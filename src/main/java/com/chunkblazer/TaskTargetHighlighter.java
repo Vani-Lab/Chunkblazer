@@ -1082,6 +1082,14 @@ public class TaskTargetHighlighter extends Overlay
 		{
 			return;
 		}
+		if (action == MenuAction.WIDGET_TARGET_ON_NPC || action == MenuAction.WIDGET_TARGET_ON_GAME_OBJECT)
+		{
+			// Using an item on something ("Raw cod -> Fire") only tracks tasks naming that
+			// item, so a tinderbox or logs used by a fire doesn't pick "Cook a Cod".
+			String used = Text.removeTags(event.getMenuTarget()).split(" -> ")[0].toLowerCase().replace("raw ", "");
+			tasks = new ArrayList<>(tasks);
+			tasks.removeIf(t -> t.getName() == null || !t.getName().toLowerCase().contains(used));
+		}
 		autoTrack(tasks);
 	}
 
