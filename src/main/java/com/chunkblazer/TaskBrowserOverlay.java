@@ -849,8 +849,9 @@ public class TaskBrowserOverlay extends Overlay
 		List<NuzlockeTask> chunk = new ArrayList<>();
 		List<NuzlockeTask> globals = new ArrayList<>();
 		String query = search.trim().toLowerCase();
-		Predicate<NuzlockeTask> test = filterTest(filterOn, filterHidden, filterSkill, filterTier)
-			.and(t -> query.isEmpty() || matchesSearch(t, query));
+		// A search looks past the filters until the box is cleared.
+		Predicate<NuzlockeTask> test = query.isEmpty() ? filterTest(filterOn, filterHidden, filterSkill, filterTier)
+			: t -> matchesSearch(t, query);
 		for (NuzlockeTask task : pool(true))
 		{
 			chunkNames.computeIfAbsent(task.getTaskId(), k -> chunkName(task));
@@ -1693,8 +1694,15 @@ public class TaskBrowserOverlay extends Overlay
 			boolean keep;
 			if (tab == Tab.NEW)
 			{
-				// Just the newly arrived tasks: no filter, archive or chunk limits.
+				// Just the newly arrived tasks: no search, filter, archive or chunk limits.
 				keep = shown.contains(id);
+			}
+			else if (!query.isEmpty())
+			{
+				// Searching looks past the filters and the chunk limit until the box is cleared.
+				keep = (tab == Tab.ARCHIVED) == archived.contains(id)
+					&& (tab != Tab.SAVED || saved.contains(id))
+					&& matchesSearch(task, query);
 			}
 			else
 			{
@@ -1703,7 +1711,7 @@ public class TaskBrowserOverlay extends Overlay
 					&& (tab != Tab.ACTIVE || test.test(task))
 					&& (here == null || here.equals(chunkNames.get(id)));
 			}
-			if (keep && (query.isEmpty() || matchesSearch(task, query)))
+			if (keep)
 			{
 				list.add(task);
 			}
