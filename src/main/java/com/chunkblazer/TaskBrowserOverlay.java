@@ -342,6 +342,10 @@ public class TaskBrowserOverlay extends Overlay
 	private volatile boolean mouseInWindow;
 	// Where the window or box was last drawn, on screen (null when neither is shown).
 	private volatile Rectangle shownArea;
+	// The quest/saved box can be up with the window open: its own scroll, area and hover.
+	private volatile int paneScroll;
+	private volatile boolean paneIn;
+	private volatile Rectangle paneArea;
 	// A hint to show by the mouse this frame (set while drawing, drawn last by drawTip).
 	private String tip;
 	private String tipQuest;
@@ -391,7 +395,9 @@ public class TaskBrowserOverlay extends Overlay
 		{
 			paneMouse = event.getPoint();
 			Rectangle area = shownArea;
-			if ((open || questPane != null) && (mouseInWindow || area != null && area.contains(event.getPoint())))
+			Rectangle box = paneArea;
+			if ((open || questPane != null) && (mouseInWindow || area != null && area.contains(event.getPoint())
+				|| box != null && questPane != null && box.contains(event.getPoint())))
 			{
 				return new MouseEvent(event.getComponent(), event.getID(), event.getWhen(), event.getModifiersEx(),
 					-1, -1, 0, false);
@@ -419,7 +425,7 @@ public class TaskBrowserOverlay extends Overlay
 			{
 				hoveredAction.run();
 			}
-			else if (event.getButton() == MouseEvent.BUTTON3 && !open && paneRowId != null)
+			else if (event.getButton() == MouseEvent.BUTTON3 && (!open || paneIn) && paneRowId != null)
 			{
 				// Right-click unsaves in the saved list, as it unstars in the side panel.
 				toggleSaved(paneRowId);
@@ -458,7 +464,14 @@ public class TaskBrowserOverlay extends Overlay
 	{
 		if ((open || questPane != null) && mouseInWindow)
 		{
-			scroll += event.getWheelRotation() * ROW;
+			if (paneIn && questPane != null)
+			{
+				paneScroll += event.getWheelRotation() * ROW;
+			}
+			else
+			{
+				scroll += event.getWheelRotation() * ROW;
+			}
 			event.consume();
 		}
 		return event;
@@ -483,13 +496,18 @@ public class TaskBrowserOverlay extends Overlay
 			// inventory, so it never blocks a prayer switch. Typing in chat and moving the camera
 			// leave it open (switching tab any other way closes it too: onVarClientIntChanged).
 			int code = event.getKeyCode();
+			boolean hadPane = questPane != null;
 			if (code == KeyEvent.VK_ESCAPE || code >= KeyEvent.VK_F1 && code <= KeyEvent.VK_F12 && !config.movableTaskBox())
 			{
 				questPane = null;
 			}
 			if (open && event.getKeyCode() == KeyEvent.VK_ESCAPE)
 			{
-				close();
+				// With the quest box up too, Esc closes just the box first.
+				if (!hadPane)
+				{
+					close();
+				}
 				event.consume();
 			}
 		}
@@ -545,7 +563,7 @@ public class TaskBrowserOverlay extends Overlay
 			public Dimension render(Graphics2D graphics)
 			{
 				Rectangle at = getBounds();
-				if (!config.movableTaskBox() || open || questPane == null || at == null
+				if (!config.movableTaskBox() || questPane == null || at == null
 					|| client.getGameState() != GameState.LOGGED_IN)
 				{
 					return null;
@@ -569,6 +587,7 @@ public class TaskBrowserOverlay extends Overlay
 		overlayManager.add(this);
 		overlayManager.add(freeBox);
 		mouseManager.registerMouseListener(mouse);
+		mouseManager.registerMouseListener(legend.mouse);
 		mouseManager.registerMouseWheelListener(wheel);
 		keyManager.registerKeyListener(keys);
 		eventBus.register(this);
@@ -585,6 +604,7 @@ public class TaskBrowserOverlay extends Overlay
 		overlayManager.remove(this);
 		overlayManager.remove(freeBox);
 		mouseManager.unregisterMouseListener(mouse);
+		mouseManager.unregisterMouseListener(legend.mouse);
 		mouseManager.unregisterMouseWheelListener(wheel);
 		keyManager.unregisterKeyListener(keys);
 		eventBus.unregister(this);
@@ -2255,20 +2275,13 @@ public class TaskBrowserOverlay extends Overlay
 		if (questPane == null)
 		{
 			paneSide = null;
+			paneIn = false;
+			paneArea = null;
 		}
 		if (!open && questPane != null && loggedIn)
 		{
-			// Anything else that moves the side panel out from under it closes it too.
-			Rectangle side = sidePanel();
-			if (paneSide != null && !paneSide.equals(side))
-			{
-				questPane = null;
-			}
-			else if (!config.movableTaskBox())
-			{
-				drawQuestPane(graphics, side, 0, 0);
-			}
-			paneSide = side;
+			shownArea = null;
+			drawSidePane(graphics);
 			return null;
 		}
 		if (!open || !loggedIn)
@@ -2491,8 +2504,31 @@ public class TaskBrowserOverlay extends Overlay
 
 		finishHover(window, mx, my);
 		shownArea = new Rectangle(x, y, width, height);
-		drawTip(graphics, mx, my, 0, 0);
+		if (questPane != null)
+		{
+			// A quest opened from the window shows beside it; the window stays open.
+			drawSidePane(graphics);
+		}
+		else
+		{
+			drawTip(graphics, mx, my, 0, 0);
+		}
 		return null;
+	}
+
+	/** The quest/saved box over the side panel. Anything that moves the side panel out from under it closes it. */
+	private void drawSidePane(Graphics2D graphics)
+	{
+		Rectangle side = sidePanel();
+		if (paneSide != null && !paneSide.equals(side))
+		{
+			questPane = null;
+		}
+		else if (!config.movableTaskBox())
+		{
+			drawQuestPane(graphics, side, 0, 0);
+		}
+		paneSide = side;
 	}
 
 	/** A header number with its label ("123 pts"), right-aligned to {@code right}; returns its width. */
@@ -2609,7 +2645,7 @@ public class TaskBrowserOverlay extends Overlay
 			rowY += rowHeight + ROW_GAP;
 		}
 		graphics.setClip(oldClip);
-		drawScrollbar(graphics, list, contentHeight);
+		drawScrollbar(graphics, list, contentHeight, scroll);
 		return tasks;
 	}
 
@@ -2636,8 +2672,17 @@ public class TaskBrowserOverlay extends Overlay
 	/** Work out what a click would do. */
 	private void finishHover(Rectangle window, int mx, int my)
 	{
-		mouseInWindow = window.contains(mx, my);
-		hoveredAction = firstHit(hits, mx, my);
+		// The quest box is drawn on top, so over it, it gets the click.
+		boolean inPane = paneIn && questPane != null;
+		mouseInWindow = inPane || window.contains(mx, my);
+		if (inPane)
+		{
+			titleHovered = false;
+		}
+		else
+		{
+			hoveredAction = firstHit(hits, mx, my);
+		}
 	}
 
 	private static Runnable firstHit(List<Hit> list, int mx, int my)
@@ -3194,8 +3239,8 @@ public class TaskBrowserOverlay extends Overlay
 
 	/**
 	 * Show a quest's requirements over the side panel (inventory, prayer...), not over its
-	 * tab buttons, and close the window so the map can be seen. It has its own close
-	 * button, and switching tab or pressing any key closes it too.
+	 * tab buttons. The task window stays open beside it. It has its own close button,
+	 * and switching tab or pressing any key closes it too.
 	 */
 	void openQuestPane(NuzlockeTask task)
 	{
@@ -3217,10 +3262,9 @@ public class TaskBrowserOverlay extends Overlay
 
 	private void showInPane(NuzlockeTask task)
 	{
-		close();
 		questPane = task;
 		questPaneAt = System.currentTimeMillis();
-		scroll = 0;
+		paneScroll = 0;
 	}
 
 	/** The quest/saved box at {@code pane}; (ox, oy) is where that's drawn on screen when it's moved. */
@@ -3229,6 +3273,9 @@ public class TaskBrowserOverlay extends Overlay
 		NuzlockeTask task = questPane;
 		int mx = paneMouse.x - ox;
 		int my = paneMouse.y - oy;
+		Runnable windowHover = hoveredAction;
+		Rectangle windowArea = shownArea;
+		boolean windowIn = open && windowArea != null && windowArea.contains(paneMouse);
 		hits.clear();
 		graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 		// A rounded card with a darker header band and an orange rule under it.
@@ -3261,7 +3308,7 @@ public class TaskBrowserOverlay extends Overlay
 			{
 				questPane = questBack.pop();
 				questPaneAt = System.currentTimeMillis();
-				scroll = 0;
+				paneScroll = 0;
 			}));
 			pill(graphics, back, "Back", back.contains(mx, my));
 		}
@@ -3293,20 +3340,31 @@ public class TaskBrowserOverlay extends Overlay
 		graphics.clip(body);
 		if (savedList)
 		{
-			drawScrollbar(graphics, body, drawSavedList(graphics, saved, body, mx, my, small));
+			drawScrollbar(graphics, body, drawSavedList(graphics, saved, body, mx, my, small), paneScroll);
 		}
 		else
 		{
 			List<QuestRequirements.Line> lines = wrapDetail(graphics.getFontMetrics(small), task, pane.width - 12);
-			scroll = Math.max(0, Math.min(scroll, detailHeight(lines) - body.height));
-			drawDetail(graphics, lines, pane.x + 6, body.y - scroll, body, mx, my, small);
-			drawScrollbar(graphics, body, detailHeight(lines));
+			paneScroll = Math.max(0, Math.min(paneScroll, detailHeight(lines) - body.height));
+			drawDetail(graphics, lines, pane.x + 6, body.y - paneScroll, body, mx, my, small);
+			drawScrollbar(graphics, body, detailHeight(lines), paneScroll);
 		}
 		graphics.setClip(oldClip);
 		graphics.translate(-(int) (16 * (1 - in) * (1 - in)), 0);
 		graphics.setComposite(oldComposite);
-		finishHover(pane, mx, my);
-		shownArea = new Rectangle(pane.x + ox, pane.y + oy, pane.width, pane.height);
+		paneIn = pane.contains(mx, my);
+		paneArea = new Rectangle(pane.x + ox, pane.y + oy, pane.width, pane.height);
+		if (paneIn)
+		{
+			mouseInWindow = true;
+			hoveredAction = firstHit(hits, mx, my);
+			titleHovered = false;
+		}
+		else
+		{
+			mouseInWindow = windowIn;
+			hoveredAction = windowIn ? windowHover : null;
+		}
 		drawTip(graphics, mx, my, ox, oy);
 	}
 
@@ -3359,9 +3417,9 @@ public class TaskBrowserOverlay extends Overlay
 			names.add(lines.size() > 2 ? Arrays.asList(lines.get(0), Skin.fit(fm, lines.get(1) + " " + lines.get(2), width)) : lines);
 			total += 24 + 12 * names.get(names.size() - 1).size();
 		}
-		scroll = Math.max(0, Math.min(scroll, total - body.height));
+		paneScroll = Math.max(0, Math.min(paneScroll, total - body.height));
 		boolean shift = client.isKeyPressed(KeyCode.KC_SHIFT);
-		int y = body.y + 4 - scroll;
+		int y = body.y + 4 - paneScroll;
 		for (int i = 0; i < saved.size(); i++)
 		{
 			NuzlockeTask task = saved.get(i);
@@ -3508,7 +3566,7 @@ public class TaskBrowserOverlay extends Overlay
 			: new Polygon(new int[]{cx - 4, cx + 4, cx}, new int[]{cy - 2, cy - 2, cy + 3}, 3));
 	}
 
-	private void drawScrollbar(Graphics2D graphics, Rectangle area, int contentHeight)
+	private void drawScrollbar(Graphics2D graphics, Rectangle area, int contentHeight, int scroll)
 	{
 		if (contentHeight <= area.height)
 		{
