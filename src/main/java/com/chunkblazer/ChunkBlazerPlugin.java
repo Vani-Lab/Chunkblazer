@@ -6065,30 +6065,10 @@ public class ChunkBlazerPlugin extends Plugin
 		String data = acStr("regionRolledTasks", "");
 		if (data != null && !data.isEmpty())
 		{
-			for (String regionEntry : data.split("\\|"))
+			Integer rolled = rolledRegionIndex(data).get(taskId);
+			if (rolled != null)
 			{
-				if (regionEntry.isEmpty()) continue;
-
-				String[] parts = regionEntry.split(":");
-				if (parts.length == 2)
-				{
-					try
-					{
-						int regionId = Integer.parseInt(parts[0]);
-						String[] tasks = parts[1].split(",");
-						for (String tid : tasks)
-						{
-							if (tid.equals(taskId))
-							{
-								return regionId;
-							}
-						}
-					}
-					catch (NumberFormatException e)
-					{
-						// Skip invalid entries
-					}
-				}
+				return rolled;
 			}
 		}
 
@@ -6130,6 +6110,43 @@ public class ChunkBlazerPlugin extends Plugin
 		return firstDefiningRegion;
 	}
 
+
+	// taskId -> region from the regionRolledTasks string, rebuilt only when that string changes.
+	// The task window asks for every task's region when it opens; parsing the whole string
+	// once per task there was a visible lag spike.
+	private String rolledIndexSource;
+	private Map<String, Integer> rolledIndex = Collections.emptyMap();
+
+	private synchronized Map<String, Integer> rolledRegionIndex(String data)
+	{
+		if (!data.equals(rolledIndexSource))
+		{
+			Map<String, Integer> index = new HashMap<>();
+			for (String regionEntry : data.split("\\|"))
+			{
+				String[] parts = regionEntry.split(":");
+				if (parts.length != 2)
+				{
+					continue;
+				}
+				try
+				{
+					int regionId = Integer.parseInt(parts[0]);
+					for (String tid : parts[1].split(","))
+					{
+						index.putIfAbsent(tid, regionId); // first region wins, as before
+					}
+				}
+				catch (NumberFormatException e)
+				{
+					// Skip invalid entries
+				}
+			}
+			rolledIndex = index;
+			rolledIndexSource = data;
+		}
+		return rolledIndex;
+	}
 
 	/** Whether this taskID belongs to the chunk-independent Global Tasks pool. */
 	public boolean isGlobalTask(String taskId)

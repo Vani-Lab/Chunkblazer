@@ -252,9 +252,16 @@ class QuestRequirements
 	}
 
 	/** True for quest tasks (they get the requirement list, with or without data). */
+	/**
+	 * A "Complete <quest>" task. Other tasks can complete on a quest too (Defeat Damis, Obtain
+	 * a Black Candle: QUEST_CHECK, but category Combat/Obtain); those are normal tasks, tracked
+	 * and listed like any other, not quests.
+	 */
 	static boolean isQuestTask(NuzlockeTask task)
 	{
-		return task != null && "QUEST_CHECK".equalsIgnoreCase(task.getCompletionType());
+		return task != null && "QUEST_CHECK".equalsIgnoreCase(task.getCompletionType())
+			&& ("Quest".equalsIgnoreCase(task.getCategory())
+			|| (task.getTaskId() != null && task.getTaskId().startsWith("quest_")));
 	}
 
 	/** The needs of a quest task, or null if it isn't a quest task we have data for. */

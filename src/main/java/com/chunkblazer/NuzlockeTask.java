@@ -65,7 +65,7 @@ public class NuzlockeTask
 	{
 		if (raw == null || raw.isEmpty())
 		{
-			return raw;
+			return "Task"; // a task with no category in the catalog, rather than "null"
 		}
 		if (raw.length() > 4 && raw.regionMatches(true, raw.length() - 4, "_Set", 0, 4))
 		{
