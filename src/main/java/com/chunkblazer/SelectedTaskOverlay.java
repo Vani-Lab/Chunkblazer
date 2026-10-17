@@ -111,6 +111,8 @@ public class SelectedTaskOverlay extends OverlayPanel
 	private float expand;
 	private long expandAt;
 	private Dimension compactSize = new Dimension(120, 17);
+	// Where the compact strip was on screen just before it started to open.
+	private Rectangle stripBounds;
 	private Dimension fullSize = new Dimension(190, 60);
 
 	private final Client client;
@@ -178,7 +180,16 @@ public class SelectedTaskOverlay extends OverlayPanel
 		// requirements, missing levels); timed tasks keep the full box for their countdown.
 		net.runelite.api.Point at = client.getMouseCanvasPosition();
 		Rectangle shown = getBounds();
-		boolean hovered = at != null && shown != null && shown.contains(at.getX(), at.getY());
+		// While it opens, the box changes size (a long name is wider as a strip than as the box,
+		// and wraps to more lines in it), so it can slide out from under the mouse, shut, slide
+		// back and open again: a jitter. Where the strip was counts as hovered too, so it stays
+		// open for as long as the mouse is on either.
+		if (expand == 0 && shown != null)
+		{
+			stripBounds = new Rectangle(shown);
+		}
+		boolean hovered = at != null && ((shown != null && shown.contains(at.getX(), at.getY()))
+			|| (expand > 0 && stripBounds != null && stripBounds.contains(at.getX(), at.getY())));
 		// Opens quickly under the mouse (0.12s), closes slower once it leaves (0.4s).
 		long now = System.currentTimeMillis();
 		long step = Math.min(100, now - expandAt);

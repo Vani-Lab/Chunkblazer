@@ -35,8 +35,10 @@ import java.awt.Composite;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
+import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
+import java.awt.Point;
 import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -68,17 +70,27 @@ import javax.inject.Singleton;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListModel;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JScrollPane;
+import javax.swing.JViewport;
+import javax.swing.ListModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
+import javax.swing.border.MatteBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import javax.swing.event.PopupMenuEvent;
+import javax.swing.event.PopupMenuListener;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.KeyCode;
@@ -98,7 +110,9 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.SkillIconManager;
+import net.runelite.client.game.SpriteManager;
 import net.runelite.client.input.KeyListener;
 import net.runelite.client.input.KeyManager;
 import net.runelite.client.input.MouseAdapter;
@@ -170,6 +184,8 @@ public class TaskBrowserOverlay extends Overlay
 	private static final Color TRACKED_FILL = new Color(255, 152, 31, 46);
 	private static final Color BOOK_ON = new Color(255, 176, 64);
 	private static final Color SIDEBAR_FILL = new Color(0, 0, 0, 44);
+	// Behind every task icon: lighter than the stone, so dark items and icons show.
+	private static final Color ITEM_SLOT = new Color(92, 84, 70);
 	private static final Color CARD_HOVER = new Color(255, 255, 255, 34);
 	private static final Color HERE = new Color(0, 230, 0);
 	private static final Color FIELD = new Color(30, 26, 21);
@@ -264,6 +280,14 @@ public class TaskBrowserOverlay extends Overlay
 	private final OverlayManager overlayManager;
 	private final MouseManager mouseManager;
 	private final SkillIconManager skillIcons;
+	// For Obtain and Equip tasks' item pictures (field-injected, so the constructor is unchanged).
+	@Inject
+	private ItemManager itemManager;
+	@Inject
+	private SpriteManager spriteManager;
+	private final Map<Integer, BufferedImage> sprites = new HashMap<>();
+	// Every task icon's slot, in pixels (quest, item, skill, combat or letter).
+	private static final int ICON_SLOT = 27;
 	private final KeyManager keyManager;
 	private final EventBus eventBus;
 	private final ChunkBlazerConfig config;
@@ -318,6 +342,10 @@ public class TaskBrowserOverlay extends Overlay
 	private volatile boolean mouseInWindow;
 	// Where the window or box was last drawn, on screen (null when neither is shown).
 	private volatile Rectangle shownArea;
+	// The quest/saved box can be up with the window open: its own scroll, area and hover.
+	private volatile int paneScroll;
+	private volatile boolean paneIn;
+	private volatile Rectangle paneArea;
 	// A hint to show by the mouse this frame (set while drawing, drawn last by drawTip).
 	private String tip;
 	private String tipQuest;
@@ -367,7 +395,9 @@ public class TaskBrowserOverlay extends Overlay
 		{
 			paneMouse = event.getPoint();
 			Rectangle area = shownArea;
-			if ((open || questPane != null) && (mouseInWindow || area != null && area.contains(event.getPoint())))
+			Rectangle box = paneArea;
+			if ((open || questPane != null) && (mouseInWindow || area != null && area.contains(event.getPoint())
+				|| box != null && questPane != null && box.contains(event.getPoint())))
 			{
 				return new MouseEvent(event.getComponent(), event.getID(), event.getWhen(), event.getModifiersEx(),
 					-1, -1, 0, false);
@@ -395,7 +425,7 @@ public class TaskBrowserOverlay extends Overlay
 			{
 				hoveredAction.run();
 			}
-			else if (event.getButton() == MouseEvent.BUTTON3 && !open && paneRowId != null)
+			else if (event.getButton() == MouseEvent.BUTTON3 && (!open || paneIn) && paneRowId != null)
 			{
 				// Right-click unsaves in the saved list, as it unstars in the side panel.
 				toggleSaved(paneRowId);
@@ -434,7 +464,14 @@ public class TaskBrowserOverlay extends Overlay
 	{
 		if ((open || questPane != null) && mouseInWindow)
 		{
-			scroll += event.getWheelRotation() * ROW;
+			if (paneIn && questPane != null)
+			{
+				paneScroll += event.getWheelRotation() * ROW;
+			}
+			else
+			{
+				scroll += event.getWheelRotation() * ROW;
+			}
 			event.consume();
 		}
 		return event;
@@ -459,13 +496,18 @@ public class TaskBrowserOverlay extends Overlay
 			// inventory, so it never blocks a prayer switch. Typing in chat and moving the camera
 			// leave it open (switching tab any other way closes it too: onVarClientIntChanged).
 			int code = event.getKeyCode();
+			boolean hadPane = questPane != null;
 			if (code == KeyEvent.VK_ESCAPE || code >= KeyEvent.VK_F1 && code <= KeyEvent.VK_F12 && !config.movableTaskBox())
 			{
 				questPane = null;
 			}
 			if (open && event.getKeyCode() == KeyEvent.VK_ESCAPE)
 			{
-				close();
+				// With the quest box up too, Esc closes just the box first.
+				if (!hadPane)
+				{
+					close();
+				}
 				event.consume();
 			}
 		}
@@ -521,7 +563,7 @@ public class TaskBrowserOverlay extends Overlay
 			public Dimension render(Graphics2D graphics)
 			{
 				Rectangle at = getBounds();
-				if (!config.movableTaskBox() || open || questPane == null || at == null
+				if (!config.movableTaskBox() || questPane == null || at == null
 					|| client.getGameState() != GameState.LOGGED_IN)
 				{
 					return null;
@@ -545,6 +587,7 @@ public class TaskBrowserOverlay extends Overlay
 		overlayManager.add(this);
 		overlayManager.add(freeBox);
 		mouseManager.registerMouseListener(mouse);
+		mouseManager.registerMouseListener(legend.mouse);
 		mouseManager.registerMouseWheelListener(wheel);
 		keyManager.registerKeyListener(keys);
 		eventBus.register(this);
@@ -561,6 +604,7 @@ public class TaskBrowserOverlay extends Overlay
 		overlayManager.remove(this);
 		overlayManager.remove(freeBox);
 		mouseManager.unregisterMouseListener(mouse);
+		mouseManager.unregisterMouseListener(legend.mouse);
 		mouseManager.unregisterMouseWheelListener(wheel);
 		keyManager.unregisterKeyListener(keys);
 		eventBus.unregister(this);
@@ -745,7 +789,11 @@ public class TaskBrowserOverlay extends Overlay
 	// The saved ids the list was last built with (read once a build, not once a card).
 	private volatile Set<String> sideSaved = Collections.emptySet();
 	// The filters and sort live here; the window shows what's set. sideSync keeps them in step.
-	private final JComboBox<String> sideSkill = new JComboBox<>();
+	// Skill filter: a button that opens the skills in the game's Skills tab layout, as icons.
+	private final JButton sideSkill = smooth(new JButton());
+	private final JPopupMenu sideSkillMenu = new JPopupMenu();
+	private long sideSkillMenuClosed;
+	private final Map<Skill, JButton> sideSkillButtons = new EnumMap<>(Skill.class);
 	private final JComboBox<String> sideTier = new JComboBox<>();
 	private final JComboBox<String> sideSort = new JComboBox<>();
 	private final IconTextField sideSearch = new IconTextField();
@@ -788,6 +836,8 @@ public class TaskBrowserOverlay extends Overlay
 				{
 					int i = sideList.locationToIndex(e.getPoint());
 					Object item = i < 0 ? null : sideList.getModel().getElementAt(i);
+					// Keep the clicked row under the mouse when the list rebuilds (see keepAnchor).
+					sideAnchor = anchorAt(i);
 					if (item instanceof String)
 					{
 						String section = ((String) item).replaceAll(" \\(.*", "");
@@ -901,6 +951,9 @@ public class TaskBrowserOverlay extends Overlay
 			DefaultListModel<Object> model = new DefaultListModel<>();
 			items.forEach(model::addElement);
 			int height = sideList.getPreferredSize().height;
+			// What to hold still: the row just clicked, else (when scrolled down) the top row in view.
+			Anchor anchor = sideAnchor != null ? sideAnchor : topAnchor();
+			sideAnchor = null;
 			sideSaved = saved;
 			sideList.setModel(model);
 			for (int i = 0; i < numbers.length; i++)
@@ -913,6 +966,7 @@ public class TaskBrowserOverlay extends Overlay
 			{
 				panel.revalidate();
 			}
+			keepAnchor(anchor);
 			sideList.repaint();
 		});
 	}
@@ -925,8 +979,37 @@ public class TaskBrowserOverlay extends Overlay
 	{
 		sideFilterBox.setOpaque(false);
 		sideFilterBox.setVisible(false);
-		sideSkill.addItem("Skills");
-		Arrays.stream(Skill.values()).filter(k -> k != Skill.OVERALL).forEach(k -> sideSkill.addItem(k.getName()));
+		sideSkill.setFont(FontManager.getRunescapeSmallFont());
+		sideSkill.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		sideSkill.setForeground(Color.WHITE);
+		sideSkill.setFocusPainted(false);
+		// Clicking the button while the grid is open closes it: the press already hid the popup, so
+		// don't reopen it straight away.
+		sideSkillMenu.addPopupMenuListener(new PopupMenuListener()
+		{
+			@Override
+			public void popupMenuWillBecomeVisible(PopupMenuEvent e)
+			{
+			}
+
+			@Override
+			public void popupMenuWillBecomeInvisible(PopupMenuEvent e)
+			{
+				sideSkillMenuClosed = System.currentTimeMillis();
+			}
+
+			@Override
+			public void popupMenuCanceled(PopupMenuEvent e)
+			{
+			}
+		});
+		sideSkill.addActionListener(e ->
+		{
+			if (System.currentTimeMillis() - sideSkillMenuClosed > 250)
+			{
+				showSkillMenu();
+			}
+		});
 		sideTier.addItem("Tiers");
 		Arrays.stream(TaskCardTier.values()).forEach(t -> sideTier.addItem(t.getDisplayName()));
 		// Each sort field twice: its usual direction first, so "Points" high to low leads.
@@ -939,7 +1022,36 @@ public class TaskBrowserOverlay extends Overlay
 		}
 		sideFilterBox.add(sideSkill);
 		sideFilterBox.add(sideTier);
-		for (JComboBox<String> combo : Arrays.asList(sideSkill, sideTier, sideSort))
+		// Every option on screen at once (no scroll bar), the number on the right past a divider.
+		sideTier.setMaximumRowCount(sideTier.getItemCount());
+		sideSort.setMaximumRowCount(sideSort.getItemCount());
+		widenPopup(sideTier, 130);
+		widenPopup(sideSort, 140);
+		sideTier.setRenderer((list, item, index, selected, focus) ->
+		{
+			int tier = sideTier.getSelectedIndex();
+			int i = index >= 0 ? index : tier;
+			if (i < 1)
+			{
+				return splitRow(index < 0 ? "Tiers" : "All tiers", null, Color.WHITE, selected && index >= 0);
+			}
+			TaskCardTier t = TaskCardTier.values()[i - 1];
+			// The closed box is narrow: just the name there, the points only in the open list.
+			return splitRow(t.getDisplayName(), index < 0 ? null : i + (i == 1 ? " pt" : " pts"), t.getAccent(), selected && index >= 0);
+		});
+		sideSort.setRenderer((list, item, index, selected, focus) ->
+		{
+			String text = String.valueOf(item);
+			String name = text.replaceFirst("^Sort: ", "").replaceAll(" [\u25B2\u25BC]$", "");
+			String arrow = text.endsWith("\u25B2") ? "\u25B2" : "\u25BC";
+			// Closed: "Sort" until a sort is picked, then just the pick ("Chunk \u25B2").
+			if (index < 0)
+			{
+				return splitRow(sideSort.getSelectedIndex() <= 0 ? "Sort" : name + " " + arrow, null, Color.WHITE, false);
+			}
+			return splitRow(name, arrow, Color.WHITE, selected, 18);
+		});
+		for (JComboBox<String> combo : Arrays.asList(sideTier, sideSort))
 		{
 			combo.setFont(FontManager.getRunescapeSmallFont());
 			combo.setBackground(ColorScheme.DARKER_GRAY_COLOR);
@@ -952,8 +1064,6 @@ public class TaskBrowserOverlay extends Overlay
 				}
 				int tier = sideTier.getSelectedIndex();
 				int sort = sideSort.getSelectedIndex();
-				filterSkill = sideSkill.getSelectedIndex() < 1 ? null
-					: Skill.valueOf(String.valueOf(sideSkill.getSelectedItem()).toUpperCase());
 				filterTier = tier < 1 ? null : TaskCardTier.values()[tier - 1];
 				sortField = SortField.values()[sort / 2];
 				ascending = sortField.ascendingByDefault == (sort % 2 == 0);
@@ -976,6 +1086,171 @@ public class TaskBrowserOverlay extends Overlay
 		}
 		sideFold.setFont(FontManager.getRunescapeSmallFont());
 		return sideFilterBox;
+	}
+
+	/** Opens a dropdown's list at least this wide, so the number column isn't cut off by a narrow box. */
+	private static void widenPopup(JComboBox<String> combo, int width)
+	{
+		combo.addPopupMenuListener(new PopupMenuListener()
+		{
+			@Override
+			public void popupMenuWillBecomeVisible(PopupMenuEvent e)
+			{
+				Object popup = combo.getUI().getAccessibleChild(combo, 0);
+				if (popup instanceof JPopupMenu && ((JPopupMenu) popup).getComponentCount() > 0)
+				{
+					JComponent scroll = (JComponent) ((JPopupMenu) popup).getComponent(0);
+					Dimension size = new Dimension(Math.max(combo.getWidth(), width), scroll.getPreferredSize().height);
+					scroll.setPreferredSize(size);
+					scroll.setMaximumSize(size);
+				}
+			}
+
+			@Override
+			public void popupMenuWillBecomeInvisible(PopupMenuEvent e)
+			{
+			}
+
+			@Override
+			public void popupMenuCanceled(PopupMenuEvent e)
+			{
+			}
+		});
+	}
+
+	/** A dropdown row: the name on the left, a fixed-width number (or arrow) on the right past a divider. */
+	private static JComponent splitRow(String left, String right, Color color, boolean highlighted)
+	{
+		return splitRow(left, right, color, highlighted, 42);
+	}
+
+	/** splitRow with the right column this wide (an arrow needs far less room than "5 pts"). */
+	private static JComponent splitRow(String left, String right, Color color, boolean highlighted, int rightWidth)
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setBorder(new EmptyBorder(3, 6, 3, 6));
+		row.setBackground(highlighted ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
+		JLabel name = smooth(new JLabel(left));
+		name.setFont(FontManager.getRunescapeSmallFont());
+		name.setForeground(color);
+		row.add(name, BorderLayout.CENTER);
+		if (right != null)
+		{
+			boolean arrow = right.equals("\u25B2") || right.equals("\u25BC");
+			// Arrows are drawn, not typed: the small font's arrow glyph is wider than its column and
+			// came out as "...". Numbers stay text.
+			JLabel number = arrow ? new JLabel(sortArrow(right.equals("\u25B2")), SwingConstants.CENTER)
+				: smooth(new JLabel(right, SwingConstants.RIGHT));
+			number.setFont(FontManager.getRunescapeSmallFont());
+			number.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			number.setBorder(new CompoundBorder(new MatteBorder(0, 1, 0, 0, ColorScheme.MEDIUM_GRAY_COLOR),
+				new EmptyBorder(0, arrow ? 1 : 6, 0, 0)));
+			number.setPreferredSize(new Dimension(rightWidth, name.getPreferredSize().height));
+			row.add(number, BorderLayout.EAST);
+		}
+		return row;
+	}
+
+	/** A small filled triangle, pointing up (ascending) or down. */
+	private static Icon sortArrow(boolean up)
+	{
+		return new Icon()
+		{
+			@Override
+			public void paintIcon(Component c, Graphics g, int x, int y)
+			{
+				Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				g2.setColor(ColorScheme.LIGHT_GRAY_COLOR);
+				g2.fillPolygon(up ? new int[]{x, x + 4, x + 8} : new int[]{x, x + 8, x + 4},
+					up ? new int[]{y + 5, y, y + 5} : new int[]{y, y, y + 5}, 3);
+				g2.dispose();
+			}
+
+			@Override
+			public int getIconWidth()
+			{
+				return 9;
+			}
+
+			@Override
+			public int getIconHeight()
+			{
+				return 6;
+			}
+		};
+	}
+
+	/** The skills as the game's Skills tab lays them out: three columns, read row by row. */
+	private static final Skill[] SKILL_TAB = {
+		Skill.ATTACK, Skill.HITPOINTS, Skill.MINING,
+		Skill.STRENGTH, Skill.AGILITY, Skill.SMITHING,
+		Skill.DEFENCE, Skill.HERBLORE, Skill.FISHING,
+		Skill.RANGED, Skill.THIEVING, Skill.COOKING,
+		Skill.PRAYER, Skill.CRAFTING, Skill.FIREMAKING,
+		Skill.MAGIC, Skill.FLETCHING, Skill.WOODCUTTING,
+		Skill.RUNECRAFT, Skill.SLAYER, Skill.FARMING,
+		Skill.CONSTRUCTION, Skill.HUNTER, Skill.SAILING,
+	};
+
+	/**
+	 * The skill filter's dropdown: each skill's icon and level, in the Skills tab's grid, with
+	 * "All skills" where the tab shows the total level. Built on first open; the levels and the
+	 * highlighted pick are refreshed each time it opens.
+	 */
+	private void showSkillMenu()
+	{
+		if (sideSkillButtons.isEmpty())
+		{
+			JPanel grid = new JPanel(new GridLayout(0, 3, 2, 2));
+			grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			for (Skill skill : SKILL_TAB)
+			{
+				JButton button = smooth(new JButton());
+				BufferedImage icon = skillIcons.getSkillImage(skill, false);
+				button.setIcon(icon == null ? null : new ImageIcon(icon));
+				button.setToolTipText(skill.getName());
+				button.setFont(FontManager.getRunescapeSmallFont());
+				button.setHorizontalAlignment(SwingConstants.LEFT);
+				button.setIconTextGap(6);
+				button.setFocusPainted(false);
+				button.setBorder(new EmptyBorder(3, 5, 3, 5));
+				button.addActionListener(e -> pickSkill(skill));
+				sideSkillButtons.put(skill, button);
+				grid.add(button);
+			}
+			JButton all = smooth(new JButton("All skills"));
+			all.setFont(FontManager.getRunescapeSmallFont());
+			all.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			all.setForeground(Color.WHITE);
+			all.setFocusPainted(false);
+			all.addActionListener(e -> pickSkill(null));
+			JPanel menu = new JPanel(new BorderLayout(0, 4));
+			menu.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			menu.setBorder(new EmptyBorder(4, 4, 4, 4));
+			menu.add(grid, BorderLayout.CENTER);
+			menu.add(all, BorderLayout.SOUTH);
+			sideSkillMenu.add(menu);
+		}
+		for (Map.Entry<Skill, JButton> e : sideSkillButtons.entrySet())
+		{
+			int level = client.getRealSkillLevel(e.getKey());
+			boolean picked = e.getKey() == filterSkill;
+			JButton button = e.getValue();
+			button.setText(level > 0 ? String.valueOf(level) : "");
+			button.setBackground(picked ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARK_GRAY_COLOR);
+			button.setForeground(picked ? ColorScheme.BRAND_ORANGE : Color.YELLOW);
+		}
+		sideSkillMenu.show(sideSkill, 0, sideSkill.getHeight());
+	}
+
+	private void pickSkill(Skill skill)
+	{
+		sideSkillMenu.setVisible(false);
+		filterSkill = skill;
+		saveFilters();
+		refresh();
+		sideChanged();
 	}
 
 	/** Search, Filters (with Clear beside it), the filter buttons, then Sort with A- / A+ beside it, spaced out. */
@@ -1063,7 +1338,10 @@ public class TaskBrowserOverlay extends Overlay
 	private void sideSync()
 	{
 		sideSyncing = true;
-		sideSkill.setSelectedItem(filterSkill == null ? "Skills" : filterSkill.getName());
+		Skill skill = filterSkill;
+		sideSkill.setText(skill == null ? "Skills \u25BE" : skill.getName());
+		BufferedImage icon = skill == null ? null : skillIcons.getSkillImage(skill, true);
+		sideSkill.setIcon(icon == null ? null : new ImageIcon(icon));
 		sideTier.setSelectedIndex(filterTier == null ? 0 : filterTier.ordinal() + 1);
 		sideSort.setSelectedIndex(sortField.ordinal() * 2 + (ascending == sortField.ascendingByDefault ? 0 : 1));
 		sideBoxes.forEach((f, box) ->
@@ -1116,13 +1394,147 @@ public class TaskBrowserOverlay extends Overlay
 	/** A header with its count, then (unless folded) all its tasks. */
 	private void addSection(List<Object> items, String title, List<NuzlockeTask> tasks)
 	{
+		// An empty section is left out entirely; its heading comes back once it has a task.
+		if (tasks.isEmpty())
+		{
+			return;
+		}
 		items.add(title + " (" + tasks.size() + ")");
 		if (sideFolded.contains(title))
 		{
 			return;
 		}
-		// Every task, however many; an empty section is just its heading.
 		items.addAll(tasks);
+	}
+
+	/**
+	 * A row the side list holds still on screen while it rebuilds: a task (by id) or a heading
+	 * (by title), the section it was in, and how far down the visible area it was.
+	 */
+	private static final class Anchor
+	{
+		final String key;
+		final String section;
+		final int y;
+		// Where its section's heading was, for when the row itself leaves that section.
+		final int sectionY;
+
+		Anchor(String key, String section, int y, int sectionY)
+		{
+			this.key = key;
+			this.section = section;
+			this.y = y;
+			this.sectionY = sectionY;
+		}
+	}
+
+	private volatile Anchor sideAnchor;
+
+	private JViewport sideViewport()
+	{
+		return (JViewport) SwingUtilities.getAncestorOfClass(JViewport.class, sideList);
+	}
+
+	/** The row's key: a task's id, or a heading's title without its count. */
+	private static String rowKey(Object item)
+	{
+		return item instanceof NuzlockeTask ? ((NuzlockeTask) item).getTaskId() : String.valueOf(item).replaceAll(" \\(.*", "");
+	}
+
+	/** The index of the section heading a row sits under, or -1. */
+	private static int headingOf(ListModel<Object> model, int index)
+	{
+		for (int i = index; i >= 0; i--)
+		{
+			if (model.getElementAt(i) instanceof String)
+			{
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	private static String sectionOf(ListModel<Object> model, int index)
+	{
+		int heading = headingOf(model, index);
+		return heading < 0 ? "" : rowKey(model.getElementAt(heading));
+	}
+
+	private Anchor anchorAt(int index)
+	{
+		JViewport view = sideViewport();
+		Rectangle cell = index < 0 ? null : sideList.getCellBounds(index, index);
+		if (view == null || cell == null)
+		{
+			return null;
+		}
+		ListModel<Object> model = sideList.getModel();
+		int y = SwingUtilities.convertPoint(sideList, 0, cell.y, view).y;
+		int heading = headingOf(model, index);
+		Rectangle headingCell = heading < 0 ? cell : sideList.getCellBounds(heading, heading);
+		int headingY = SwingUtilities.convertPoint(sideList, 0, headingCell.y, view).y;
+		return new Anchor(rowKey(model.getElementAt(index)), sectionOf(model, index), y, headingY);
+	}
+
+	/** The first row in view, but only when scrolled down: at the top, new sections just appear. */
+	private Anchor topAnchor()
+	{
+		JViewport view = sideViewport();
+		if (view == null || view.getViewPosition().y == 0)
+		{
+			return null;
+		}
+		Point top = SwingUtilities.convertPoint(view, 0, 0, sideList);
+		return anchorAt(sideList.locationToIndex(new Point(0, Math.max(0, top.y))));
+	}
+
+	/**
+	 * After a rebuild, scroll so the anchored row is back where it was. If the row left its
+	 * section (a task just saved moves to Saved), its old section's heading is held instead,
+	 * so the view doesn't jump to wherever the row went.
+	 */
+	private void keepAnchor(Anchor anchor)
+	{
+		JViewport view = sideViewport();
+		if (anchor == null || view == null)
+		{
+			return;
+		}
+		JScrollPane scroll = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, view);
+		if (scroll != null)
+		{
+			scroll.validate(); // lay out now, so the rows' new positions are final
+		}
+		ListModel<Object> model = sideList.getModel();
+		int found = -1;
+		int heading = -1;
+		for (int i = 0; i < model.getSize() && found < 0; i++)
+		{
+			Object item = model.getElementAt(i);
+			String key = rowKey(item);
+			if (item instanceof String && key.equals(anchor.section))
+			{
+				heading = i;
+			}
+			if (key.equals(anchor.key) && sectionOf(model, i).equals(anchor.section))
+			{
+				found = i;
+			}
+		}
+		int index = found >= 0 ? found : heading;
+		Rectangle cell = index < 0 ? null : sideList.getCellBounds(index, index);
+		if (cell == null)
+		{
+			return;
+		}
+		// The row back where it was; or, if it left its section, that section's heading back
+		// where it was (the rows under it just close the gap).
+		int was = found >= 0 ? anchor.y : anchor.sectionY;
+		int now = SwingUtilities.convertPoint(sideList, 0, cell.y, view).y;
+		Point position = view.getViewPosition();
+		int max = Math.max(0, view.getView().getHeight() - view.getHeight());
+		position.y = Math.max(0, Math.min(max, position.y + now - was));
+		view.setViewPosition(position);
 	}
 
 	/** Move the hover highlight, repainting just the row it left and the one it's on. */
@@ -1479,7 +1891,8 @@ public class TaskBrowserOverlay extends Overlay
 				return typeIs(task, "NPC_KILL", "SLAYER")
 					|| (task.getCategory() != null && task.getCategory().toLowerCase().contains("combat"));
 			case OBTAIN:
-				return typeIs(task, "OBTAIN");
+				// Includes items that come from a quest (Obtain a Black Candle).
+				return typeIs(task, "OBTAIN") || "Obtain".equalsIgnoreCase(task.getCategory());
 			case EQUIP:
 				return typeIs(task, "EQUIP");
 			case TALK:
@@ -1487,7 +1900,7 @@ public class TaskBrowserOverlay extends Overlay
 			case ACHIEVEMENTS:
 				return typeIs(task, "COMBAT_ACHIEVEMENT", "RAID_CHALLENGE");
 			case QUESTS:
-				return typeIs(task, "QUEST_CHECK");
+				return QuestRequirements.isQuestTask(task);
 			case PROGRESSION:
 				return typeIs(task, "SKILL_THRESHOLD");
 			case CAN_DO:
@@ -1673,6 +2086,7 @@ public class TaskBrowserOverlay extends Overlay
 			return rows;
 		}
 		rowsBuiltAt = now;
+		rowNames.clear(); // levels or readiness may have changed: names re-wrap with the new rows
 
 		String query = search.trim().toLowerCase();
 		Set<String> saved = savedIds();
@@ -1861,20 +2275,13 @@ public class TaskBrowserOverlay extends Overlay
 		if (questPane == null)
 		{
 			paneSide = null;
+			paneIn = false;
+			paneArea = null;
 		}
 		if (!open && questPane != null && loggedIn)
 		{
-			// Anything else that moves the side panel out from under it closes it too.
-			Rectangle side = sidePanel();
-			if (paneSide != null && !paneSide.equals(side))
-			{
-				questPane = null;
-			}
-			else if (!config.movableTaskBox())
-			{
-				drawQuestPane(graphics, side, 0, 0);
-			}
-			paneSide = side;
+			shownArea = null;
+			drawSidePane(graphics);
 			return null;
 		}
 		if (!open || !loggedIn)
@@ -2073,13 +2480,55 @@ public class TaskBrowserOverlay extends Overlay
 		graphics.setColor(LABEL);
 		int footY = y + height - 7;
 		Skin.text(graphics, shown + (shown == 1 ? " task" : " tasks"), cx, footY);
-		String hint = "Click: track   Shift + click: save   Arrow: details";
-		Skin.text(graphics, hint, x + width - PAD - sm.stringWidth(hint), footY);
+		// Each control on its own: the key in the title colour, what it does in the label colour,
+		// with a divider between, so it doesn't read as one long sentence.
+		String[][] hints = {{"Click", "track"}, {"Shift + click", "save"}, {"Arrow", "details"}};
+		String gap = "   |   ";
+		int hintX = x + width - PAD;
+		for (int i = hints.length - 1; i >= 0; i--)
+		{
+			String action = " " + hints[i][1];
+			hintX -= sm.stringWidth(action);
+			graphics.setColor(LABEL);
+			Skin.text(graphics, action, hintX, footY);
+			hintX -= sm.stringWidth(hints[i][0]);
+			graphics.setColor(TITLE);
+			Skin.text(graphics, hints[i][0], hintX, footY);
+			if (i > 0)
+			{
+				hintX -= sm.stringWidth(gap);
+				graphics.setColor(LABEL.darker());
+				Skin.text(graphics, gap, hintX, footY);
+			}
+		}
 
 		finishHover(window, mx, my);
 		shownArea = new Rectangle(x, y, width, height);
-		drawTip(graphics, mx, my, 0, 0);
+		if (questPane != null)
+		{
+			// A quest opened from the window shows beside it; the window stays open.
+			drawSidePane(graphics);
+		}
+		else
+		{
+			drawTip(graphics, mx, my, 0, 0);
+		}
 		return null;
+	}
+
+	/** The quest/saved box over the side panel. Anything that moves the side panel out from under it closes it. */
+	private void drawSidePane(Graphics2D graphics)
+	{
+		Rectangle side = sidePanel();
+		if (paneSide != null && !paneSide.equals(side))
+		{
+			questPane = null;
+		}
+		else if (!config.movableTaskBox())
+		{
+			drawQuestPane(graphics, side, 0, 0);
+		}
+		paneSide = side;
 	}
 
 	/** A header number with its label ("123 pts"), right-aligned to {@code right}; returns its width. */
@@ -2158,7 +2607,15 @@ public class TaskBrowserOverlay extends Overlay
 		{
 			graphics.setFont(regular);
 			graphics.setColor(SUBTEXT);
-			drawStar(graphics, list.x + list.width / 2, list.y + list.height / 2 - 22, 12, STAR_OFF, false);
+			// The empty Archived list's message is about the book icon, so it shows the book.
+			if (tab == Tab.ARCHIVED)
+			{
+				TaskArchive.drawBook(graphics, list.x + list.width / 2 - 9, list.y + list.height / 2 - 34, 18, 22, STAR_OFF, false);
+			}
+			else
+			{
+				drawStar(graphics, list.x + list.width / 2, list.y + list.height / 2 - 22, 12, STAR_OFF, false);
+			}
 			drawCentered(graphics, emptyMessage(), list);
 		}
 		int rowY = list.y + 4 - scroll;
@@ -2188,7 +2645,7 @@ public class TaskBrowserOverlay extends Overlay
 			rowY += rowHeight + ROW_GAP;
 		}
 		graphics.setClip(oldClip);
-		drawScrollbar(graphics, list, contentHeight);
+		drawScrollbar(graphics, list, contentHeight, scroll);
 		return tasks;
 	}
 
@@ -2215,8 +2672,17 @@ public class TaskBrowserOverlay extends Overlay
 	/** Work out what a click would do. */
 	private void finishHover(Rectangle window, int mx, int my)
 	{
-		mouseInWindow = window.contains(mx, my);
-		hoveredAction = firstHit(hits, mx, my);
+		// The quest box is drawn on top, so over it, it gets the click.
+		boolean inPane = paneIn && questPane != null;
+		mouseInWindow = inPane || window.contains(mx, my);
+		if (inPane)
+		{
+			titleHovered = false;
+		}
+		else
+		{
+			hoveredAction = firstHit(hits, mx, my);
+		}
 	}
 
 	private static Runnable firstHit(List<Hit> list, int mx, int my)
@@ -2394,27 +2860,117 @@ public class TaskBrowserOverlay extends Overlay
 		return chipX;
 	}
 
-	/** A skill's icon on a small round plate, or the tier's colour with a letter when there's no skill. */
+	/**
+	 * Every task's icon, in the same light stone slot: a quest's quest icon, an Obtain or Equip
+	 * task's item, a skill task's skill icon, a combat task's crossed swords, or (none of
+	 * those) the tier's colour with the category's first letter. Each picture is scaled to fit
+	 * inside the slot, keeping its shape, so none hangs over the edge.
+	 */
 	private void drawTaskIcon(Graphics2D graphics, int x, int y, Skill skill, NuzlockeTask task)
 	{
-		// A sunk stone slot, like an inventory or Leagues icon slot.
-		graphics.setColor(FIELD);
-		graphics.fillRect(x, y, 22, 22);
-		Skin.bevel(graphics, new Rectangle(x, y, 22, 22), false);
-		BufferedImage image = skill == null ? null : skillIcons.getSkillImage(skill, true);
-		if (image != null)
+		Rectangle slot = new Rectangle(x - 1, y - 3, ICON_SLOT, ICON_SLOT);
+		graphics.setColor(ITEM_SLOT);
+		graphics.fillRect(slot.x, slot.y, slot.width, slot.height);
+		Skin.bevel(graphics, slot, false);
+		BufferedImage image = iconFor(task, skill);
+		if (image != null && image.getWidth() > 0 && image.getHeight() > 0)
 		{
-			graphics.drawImage(image, x + (22 - image.getWidth()) / 2, y + (22 - image.getHeight()) / 2, null);
+			int room = ICON_SLOT - 4;
+			double scale = Math.min(room / (double) image.getWidth(), room / (double) image.getHeight());
+			int w = (int) Math.round(image.getWidth() * scale);
+			int h = (int) Math.round(image.getHeight() * scale);
+			Object hint = graphics.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+			graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+			graphics.drawImage(image, slot.x + (ICON_SLOT - w) / 2, slot.y + (ICON_SLOT - h) / 2, w, h, null);
+			if (hint != null)
+			{
+				graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, hint);
+			}
 			return;
 		}
 		Color tier = task == null ? SUBTEXT : TaskCardTier.fromTask(task).getAccent();
 		graphics.setColor(new Color(tier.getRed(), tier.getGreen(), tier.getBlue(), 120));
-		graphics.fillOval(x + 3, y + 3, 16, 16);
+		graphics.fillOval(slot.x + 4, slot.y + 4, ICON_SLOT - 8, ICON_SLOT - 8);
 		String letter = task == null || task.getCategory() == null || task.getCategory().isEmpty() ? "?"
 			: NuzlockeTask.displayCategory(task.getCategory()).substring(0, 1);
 		graphics.setFont(Skin.small());
 		graphics.setColor(Color.WHITE);
-		drawCentered(graphics, letter, new Rectangle(x, y, 22, 22));
+		drawCentered(graphics, letter, slot);
+	}
+
+	/** The picture for a task's slot (see drawTaskIcon), or null for the letter fallback. */
+	private BufferedImage iconFor(NuzlockeTask task, Skill skill)
+	{
+		if (task != null && QuestRequirements.isQuestTask(task))
+		{
+			return sprite(net.runelite.api.gameval.SpriteID.SideIcons.QUEST);
+		}
+		BufferedImage item = itemImage(task);
+		if (item != null)
+		{
+			return item;
+		}
+		if (skill == null && task != null && typeIs(task, "SKILL_THRESHOLD"))
+		{
+			skill = progressionSkill(task); // "Reach Level 50 Mining": the skill it's a goal for
+		}
+		if (skill != null)
+		{
+			return skillIcons.getSkillImage(skill, false);
+		}
+		if (task != null && typeIs(task, "NPC_DIALOGUE"))
+		{
+			return sprite(net.runelite.api.gameval.SpriteID.OptionsIcons.CHAT); // the speech bubble
+		}
+		if (task != null && (typeIs(task, "NPC_KILL", "SLAYER", "COMBAT")
+			|| (task.getCategory() != null && task.getCategory().toLowerCase().contains("combat"))))
+		{
+			return sprite(net.runelite.api.gameval.SpriteID.SideIcons.COMBAT);
+		}
+		return null;
+	}
+
+	/** The skill a progression (level-up) task is for, or null. */
+	private static Skill progressionSkill(NuzlockeTask task)
+	{
+		TaskConstraints c = task.getConstraints();
+		try
+		{
+			return c == null || c.getRequiredSkill() == null ? null : Skill.valueOf(c.getRequiredSkill().toUpperCase());
+		}
+		catch (IllegalArgumentException e)
+		{
+			return null;
+		}
+	}
+
+	/** A game sprite (frame 0), loaded once. Overlays draw on the client thread, as loading needs. */
+	private BufferedImage sprite(int id)
+	{
+		BufferedImage image = sprites.get(id);
+		if (image == null && spriteManager != null)
+		{
+			image = spriteManager.getSprite(id, 0);
+			if (image != null)
+			{
+				sprites.put(id, image);
+			}
+		}
+		return image;
+	}
+
+	/** The picture of an Obtain or Equip task's (first) item, or null for any other task. */
+	private BufferedImage itemImage(NuzlockeTask task)
+	{
+		String type = task == null || task.getCompletionType() == null ? "" : task.getCompletionType().toUpperCase();
+		if (itemManager == null || !(type.equals("OBTAIN") || type.equals("EQUIP"))
+			|| task.getRequiredItems() == null || task.getRequiredItems().isEmpty())
+		{
+			return null;
+		}
+		RequiredItem first = task.getRequiredItems().get(0);
+		List<Integer> ids = first == null ? null : first.getItemIds();
+		return ids == null || ids.isEmpty() ? null : itemManager.getImage(ids.get(0));
 	}
 
 	private void drawRow(Graphics2D graphics, NuzlockeTask task, Rectangle row, List<QuestRequirements.Line> detail,
@@ -2480,7 +3036,18 @@ public class TaskBrowserOverlay extends Overlay
 		drawDetail(graphics, detail, textX, row.y + ROW - 1 + lift, list, mx, my, small);
 		if (inList)
 		{
-			hits.add(new Hit(row.intersection(list), () -> trackOrOpen(task, this::openQuestPane)));
+			hits.add(new Hit(row.intersection(list), () ->
+			{
+				// Shift + click saves (or unsaves), as the hint line says; a plain click tracks.
+				if (client.isKeyPressed(KeyCode.KC_SHIFT))
+				{
+					toggleSaved(taskId);
+				}
+				else
+				{
+					trackOrOpen(task, this::openQuestPane);
+				}
+			}));
 		}
 		if (expandable)
 		{
@@ -2519,7 +3086,9 @@ public class TaskBrowserOverlay extends Overlay
 			int progressWidth = sm.stringWidth(progress);
 			graphics.setColor(SUBTEXT);
 			Skin.text(graphics, progress, rightEdge - progressWidth, row.y + 32 + lift);
-			int barX = rightEdge - progressWidth - 62;
+			// A fixed slot for the count, so every row's bar lines up whether it says 0/4 or 0/56.
+			int slot = Math.max(progressWidth, sm.stringWidth("888/888"));
+			int barX = rightEdge - slot - 62;
 			Skin.bar(graphics, barX, row.y + 26 + lift, 56, 6, (float) TaskTargetExtras.progress(task), tier, 0, false);
 		}
 	}
@@ -2670,8 +3239,8 @@ public class TaskBrowserOverlay extends Overlay
 
 	/**
 	 * Show a quest's requirements over the side panel (inventory, prayer...), not over its
-	 * tab buttons, and close the window so the map can be seen. It has its own close
-	 * button, and switching tab or pressing any key closes it too.
+	 * tab buttons. The task window stays open beside it. It has its own close button,
+	 * and switching tab or pressing any key closes it too.
 	 */
 	void openQuestPane(NuzlockeTask task)
 	{
@@ -2693,10 +3262,9 @@ public class TaskBrowserOverlay extends Overlay
 
 	private void showInPane(NuzlockeTask task)
 	{
-		close();
 		questPane = task;
 		questPaneAt = System.currentTimeMillis();
-		scroll = 0;
+		paneScroll = 0;
 	}
 
 	/** The quest/saved box at {@code pane}; (ox, oy) is where that's drawn on screen when it's moved. */
@@ -2705,6 +3273,9 @@ public class TaskBrowserOverlay extends Overlay
 		NuzlockeTask task = questPane;
 		int mx = paneMouse.x - ox;
 		int my = paneMouse.y - oy;
+		Runnable windowHover = hoveredAction;
+		Rectangle windowArea = shownArea;
+		boolean windowIn = open && windowArea != null && windowArea.contains(paneMouse);
 		hits.clear();
 		graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 		// A rounded card with a darker header band and an orange rule under it.
@@ -2737,7 +3308,7 @@ public class TaskBrowserOverlay extends Overlay
 			{
 				questPane = questBack.pop();
 				questPaneAt = System.currentTimeMillis();
-				scroll = 0;
+				paneScroll = 0;
 			}));
 			pill(graphics, back, "Back", back.contains(mx, my));
 		}
@@ -2769,20 +3340,31 @@ public class TaskBrowserOverlay extends Overlay
 		graphics.clip(body);
 		if (savedList)
 		{
-			drawScrollbar(graphics, body, drawSavedList(graphics, saved, body, mx, my, small));
+			drawScrollbar(graphics, body, drawSavedList(graphics, saved, body, mx, my, small), paneScroll);
 		}
 		else
 		{
 			List<QuestRequirements.Line> lines = wrapDetail(graphics.getFontMetrics(small), task, pane.width - 12);
-			scroll = Math.max(0, Math.min(scroll, detailHeight(lines) - body.height));
-			drawDetail(graphics, lines, pane.x + 6, body.y - scroll, body, mx, my, small);
-			drawScrollbar(graphics, body, detailHeight(lines));
+			paneScroll = Math.max(0, Math.min(paneScroll, detailHeight(lines) - body.height));
+			drawDetail(graphics, lines, pane.x + 6, body.y - paneScroll, body, mx, my, small);
+			drawScrollbar(graphics, body, detailHeight(lines), paneScroll);
 		}
 		graphics.setClip(oldClip);
 		graphics.translate(-(int) (16 * (1 - in) * (1 - in)), 0);
 		graphics.setComposite(oldComposite);
-		finishHover(pane, mx, my);
-		shownArea = new Rectangle(pane.x + ox, pane.y + oy, pane.width, pane.height);
+		paneIn = pane.contains(mx, my);
+		paneArea = new Rectangle(pane.x + ox, pane.y + oy, pane.width, pane.height);
+		if (paneIn)
+		{
+			mouseInWindow = true;
+			hoveredAction = firstHit(hits, mx, my);
+			titleHovered = false;
+		}
+		else
+		{
+			mouseInWindow = windowIn;
+			hoveredAction = windowIn ? windowHover : null;
+		}
 		drawTip(graphics, mx, my, ox, oy);
 	}
 
@@ -2835,9 +3417,9 @@ public class TaskBrowserOverlay extends Overlay
 			names.add(lines.size() > 2 ? Arrays.asList(lines.get(0), Skin.fit(fm, lines.get(1) + " " + lines.get(2), width)) : lines);
 			total += 24 + 12 * names.get(names.size() - 1).size();
 		}
-		scroll = Math.max(0, Math.min(scroll, total - body.height));
+		paneScroll = Math.max(0, Math.min(paneScroll, total - body.height));
 		boolean shift = client.isKeyPressed(KeyCode.KC_SHIFT);
-		int y = body.y + 4 - scroll;
+		int y = body.y + 4 - paneScroll;
 		for (int i = 0; i < saved.size(); i++)
 		{
 			NuzlockeTask task = saved.get(i);
@@ -2984,7 +3566,7 @@ public class TaskBrowserOverlay extends Overlay
 			: new Polygon(new int[]{cx - 4, cx + 4, cx}, new int[]{cy - 2, cy - 2, cy + 3}, 3));
 	}
 
-	private void drawScrollbar(Graphics2D graphics, Rectangle area, int contentHeight)
+	private void drawScrollbar(Graphics2D graphics, Rectangle area, int contentHeight, int scroll)
 	{
 		if (contentHeight <= area.height)
 		{
@@ -3026,7 +3608,16 @@ public class TaskBrowserOverlay extends Overlay
 
 	/** Split text into lines that fit the width, breaking between words. */
 	/** A task's name (with any missing levels) as its row shows it, wrapped onto up to three lines. */
+	// Wrapped task names, per task and width: worked out once per list rebuild, not every frame
+	// for every task (each one checks levels and quest readiness and measures every word).
+	private final Map<String, List<String>> rowNames = new HashMap<>();
+
 	private List<String> rowName(FontMetrics fm, NuzlockeTask task, int width)
+	{
+		return rowNames.computeIfAbsent(task.getTaskId() + "|" + width + "|" + fm.getFont().getSize(), k -> buildRowName(fm, task, width));
+	}
+
+	private List<String> buildRowName(FontMetrics fm, NuzlockeTask task, int width)
 	{
 		String name = (task.getName() == null ? task.getTaskId() : task.getName()) + (canDo(task) ? "" : " " + levelNote(task));
 		List<String> lines = wrap(fm, name, width);
