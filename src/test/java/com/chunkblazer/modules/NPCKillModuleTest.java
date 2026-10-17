@@ -1397,6 +1397,19 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 		assertTrue(credited.contains(timed));
 	}
 
+	/** Beefaros: the timed Mountain Troll task took every mountain troll kill from "Troll on Task". */
+	@Test
+	void differentConditionsDontStarveEachOther()
+	{
+		NuzlockeTask onTask = wolfTask("Defeat a Troll on Task", "defeat_troll_on_task", "SLAYER", null, 936, 937, 938, 4135, 4136);
+		NuzlockeTask timed = wolfTask("Defeat a Mountain Troll in 15 Seconds", "defeat_mountain_troll_fast", "NPC_Kill", 25, 936, 937);
+
+		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(onTask, timed));
+
+		assertTrue(credited.contains(onTask), "the on-task troll task still gets the kill");
+		assertTrue(credited.contains(timed));
+	}
+
 	/** Within plain tasks the narrower one still wins (an Ogress isn't counted as an Ogre). */
 	@Test
 	void narrowerPlainTaskStillWinsOverBroaderPlainTask()

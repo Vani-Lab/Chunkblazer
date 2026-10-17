@@ -1507,6 +1507,10 @@ public class NPCKillModule extends AbstractTaskModule
 	 * of the plain one. Narrowed together, "Defeat a White Wolf on Task" ({107, 108})
 	 * took the kill from "Defeat a White Wolf" ({107, 108, 109}) and then failed its
 	 * own condition, so the plain task never counted anything.
+	 *
+	 * Conditional tasks are narrowed per KIND of condition too: the timed "Defeat a
+	 * Mountain Troll fast" (8 ids) took every mountain troll kill from "Defeat a Troll
+	 * on Task" (58 ids), so the on-task task never saw one.
 	 */
 	List<NuzlockeTask> mostSpecificMatches(List<NuzlockeTask> matches)
 	{
@@ -1514,22 +1518,25 @@ public class NPCKillModule extends AbstractTaskModule
 		{
 			return matches;
 		}
-		List<NuzlockeTask> plain = new ArrayList<>();
-		List<NuzlockeTask> conditional = new ArrayList<>();
+		Map<String, List<NuzlockeTask>> byKind = new java.util.LinkedHashMap<>();
 		for (NuzlockeTask task : matches)
 		{
-			(isConditional(task) ? conditional : plain).add(task);
+			byKind.computeIfAbsent(conditionKind(task), k -> new ArrayList<>()).add(task);
 		}
-		List<NuzlockeTask> out = narrowest(plain);
-		out.addAll(narrowest(conditional));
+		List<NuzlockeTask> out = new ArrayList<>();
+		for (List<NuzlockeTask> kind : byKind.values())
+		{
+			out.addAll(narrowest(kind));
+		}
 		return out;
 	}
 
-	private static boolean isConditional(NuzlockeTask task)
+	private static String conditionKind(NuzlockeTask task)
 	{
 		TaskConstraints c = task.getConstraints();
-		return requiresOnTaskGate(task) || (c != null && (c.hasTimeLimit() || c.hasEquipmentConstraints()
-			|| c.hasDroppedItemConstraint() || c.hasVarbitConstraints()));
+		boolean has = c != null;
+		return "" + requiresOnTaskGate(task) + (has && c.hasTimeLimit()) + (has && c.hasEquipmentConstraints())
+			+ (has && c.hasDroppedItemConstraint()) + (has && c.hasVarbitConstraints());
 	}
 
 	/** The tasks among {@code matches} with the smallest target-NPC id set. */
