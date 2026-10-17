@@ -195,6 +195,24 @@ class ThievingModuleTest extends AbstractTaskModuleTest
 		verify(completionCallback, never()).onProgressUpdated(eq(fortunatoTask), anyInt());
 	}
 
+	/** Verictorga: walking to a Chaos Druid Tower chest and searching it took longer than 5 ticks. */
+	@Test
+	void chestSearchedAfterAWalkStillCounts()
+	{
+		NuzlockeTask chest = createTaskWithRequiredObject(
+			"Steal from the Chaos Druid Tower Chest", "steal_chaos_druid_tower_chest", "THIEVING", 1, Collections.singletonList(11738));
+		when(client.getSkillExperience(Skill.THIEVING)).thenReturn(1000);
+		thievingModule.addActiveTask(chest);
+
+		when(client.getTickCount()).thenReturn(100);
+		thievingModule.onMenuOptionClicked(mockObjectClick(11738, MenuAction.GAME_OBJECT_FIRST_OPTION));
+
+		when(client.getTickCount()).thenReturn(112);
+		thievingModule.onStatChanged(mockThievingXp(1250));
+
+		verify(completionCallback).onProgressUpdated(eq(chest), eq(1));
+	}
+
 	@Test
 	void testStallTheft_UnrelatedStallCreditsNothing()
 	{
@@ -244,7 +262,7 @@ class ThievingModuleTest extends AbstractTaskModuleTest
 	@Test
 	void testStallTheft_LateXpDoesNotCredit()
 	{
-		// If the XP gain arrives more than INTERACTION_TIMEOUT_TICKS (5) after the click,
+		// If the XP gain arrives more than OBJECT_TIMEOUT_TICKS (20) after the click,
 		// it must not be associated with that click.
 		NuzlockeTask seedTask = createTaskWithRequiredObject(
 			"Steal from a Seed Stall", "steal_seed_stall", "THIEVING", 1, Collections.singletonList(SEED_STALL_ID));
@@ -255,8 +273,8 @@ class ThievingModuleTest extends AbstractTaskModuleTest
 		when(client.getTickCount()).thenReturn(100);
 		thievingModule.onMenuOptionClicked(mockObjectClick(SEED_STALL_ID, MenuAction.GAME_OBJECT_SECOND_OPTION));
 
-		// 10 ticks later, well past the 5-tick timeout. XP source is some unrelated thieving activity.
-		when(client.getTickCount()).thenReturn(110);
+		// 25 ticks later, past the 20-tick object timeout. XP source is some unrelated thieving activity.
+		when(client.getTickCount()).thenReturn(125);
 		thievingModule.onStatChanged(mockThievingXp(1010));
 
 		verify(completionCallback, never()).onProgressUpdated(any(NuzlockeTask.class), anyInt());
@@ -296,6 +314,21 @@ class ThievingModuleTest extends AbstractTaskModuleTest
 		thievingModule.onMenuOptionClicked(npcClick(VARROCK_GUARD, "Pickpocket"));
 		when(client.getTickCount()).thenReturn(102);
 		thievingModule.onStatChanged(mockThievingXp(1040));
+		verify(completionCallback).onProgressUpdated(eq(task), eq(1));
+	}
+
+	/** Sydlo: Dig Site workmen are pickpocketed with "Steal-from", not "Pickpocket". */
+	@Test
+	void stealFromDigsiteWorkmanCredits()
+	{
+		NuzlockeTask task = createTaskWithNpc("Pickpocket a Digsite Worker", "pickpocket_digsite_worker", "THIEVING", 1,
+			Collections.singletonList(3628));
+		when(client.getSkillExperience(Skill.THIEVING)).thenReturn(1000);
+		thievingModule.addActiveTask(task);
+		when(client.getTickCount()).thenReturn(100);
+		thievingModule.onMenuOptionClicked(npcClick(3628, "Steal-from"));
+		when(client.getTickCount()).thenReturn(102);
+		thievingModule.onStatChanged(mockThievingXp(1022));
 		verify(completionCallback).onProgressUpdated(eq(task), eq(1));
 	}
 

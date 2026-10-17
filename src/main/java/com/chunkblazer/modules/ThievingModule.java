@@ -73,6 +73,9 @@ public class ThievingModule extends AbstractTaskModule
 
 	// How many ticks after interacting with an NPC we consider XP gains as pickpockets
 	private static final int INTERACTION_TIMEOUT_TICKS = 5;
+	// A chest is walked to, then searched for traps before the XP lands (Chaos Druid
+	// Tower), so an object click waits longer. Any other click still disarms it.
+	private static final int OBJECT_TIMEOUT_TICKS = 20;
 	private static final Set<MenuAction> NPC_ACTIONS = EnumSet.of(
 		MenuAction.NPC_FIRST_OPTION, MenuAction.NPC_SECOND_OPTION, MenuAction.NPC_THIRD_OPTION,
 		MenuAction.NPC_FOURTH_OPTION, MenuAction.NPC_FIFTH_OPTION);
@@ -222,9 +225,11 @@ public class ThievingModule extends AbstractTaskModule
 		boolean npcAction = NPC_ACTIONS.contains(action);
 		boolean objectAction = GAME_OBJECT_ACTIONS.contains(action);
 
-		// Only a Pickpocket click arms an NPC task. Anything else done to the world
-		// replaces it: the XP that follows belongs to that, not to the pickpocket.
-		if (npcAction && "Pickpocket".equalsIgnoreCase(event.getMenuOption()))
+		// Only a Pickpocket click arms an NPC task (Dig Site workmen say "Steal-from").
+		// Anything else done to the world replaces it: the XP that follows belongs to
+		// that, not to the pickpocket.
+		String option = event.getMenuOption();
+		if (npcAction && ("Pickpocket".equalsIgnoreCase(option) || "Steal-from".equalsIgnoreCase(option)))
 		{
 			NPC npc = event.getMenuEntry() != null ? event.getMenuEntry().getNpc() : null;
 			int npcId = npc != null ? npc.getId() : -1;
@@ -288,7 +293,7 @@ public class ThievingModule extends AbstractTaskModule
 				(currentTick - lastInteractionTick) <= INTERACTION_TIMEOUT_TICKS &&
 				watchedNpcIds.contains(lastInteractionNpcId);
 			boolean recentObject = lastInteractionObjectId > 0 &&
-				(currentTick - lastInteractionObjectTick) <= INTERACTION_TIMEOUT_TICKS &&
+				(currentTick - lastInteractionObjectTick) <= OBJECT_TIMEOUT_TICKS &&
 				watchedObjectIds.contains(lastInteractionObjectId);
 
 			// If both fired, the more recent one wins — protects against e.g. clicking a stall
