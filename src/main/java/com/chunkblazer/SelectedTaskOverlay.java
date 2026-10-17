@@ -35,6 +35,7 @@ import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.awt.BasicStroke;
 import java.util.ArrayList;
 import java.util.List;
@@ -79,7 +80,8 @@ public class SelectedTaskOverlay extends OverlayPanel
 	private static final int CLOSE_MARGIN = 5;
 	private static final Color CLOSE_IDLE = new Color(200, 200, 200);
 	private static final Color CLOSE_HOVER = new Color(255, 90, 90);
-	private static final Color ARCHIVE_HOVER = new Color(190, 140, 90);
+	private static final BufferedImage BOOK = Skin.image("book_box");
+	private static final BufferedImage BOOK_HOVER = Skin.image("book_box_hover");
 	private static final Color NET_ORANGE = new Color(255, 152, 0);
 
 	// Countdown colours, from plenty of time left to out of time.
@@ -313,8 +315,7 @@ public class SelectedTaskOverlay extends OverlayPanel
 		graphics.setStroke(new BasicStroke(2));
 		graphics.drawLine(box.x, box.y, box.x + box.width, box.y + box.height);
 		graphics.drawLine(box.x, box.y + box.height, box.x + box.width, box.y);
-		TaskArchive.drawBook(graphics, book.x, book.y, book.width, book.height,
-				archiveHovered ? ARCHIVE_HOVER : CLOSE_IDLE, false);
+		graphics.drawImage(archiveHovered ? BOOK_HOVER : BOOK, book.x - 1, book.y - 1, null);
 		// A bar ("shrink to the strip") on the detailed box, an outlined box ("keep it open") on the compact one.
 		graphics.setColor(modeHovered ? CLOSE_HOVER : CLOSE_IDLE);
 		if (style == TaskTrackerStyle.COMPACT)

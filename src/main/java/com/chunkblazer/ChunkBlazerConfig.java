@@ -332,18 +332,6 @@ public interface ChunkBlazerConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showSavedTaskTracker",
-		name = "Saved Tasks Bubble",
-		description = "A bubble that opens your saved tasks (Alt + drag to move)",
-		section = taskSection,
-		position = 3
-	)
-	default boolean showSavedTaskTracker()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "movableTaskBox",
 		name = "Movable Quest/Saved Box",
 		description = "Open quest requirements and saved tasks in a box you can Alt + drag, instead of over the inventory",
@@ -414,18 +402,6 @@ public interface ChunkBlazerConfig extends Config
 	default java.awt.Color taskHighlightUnavailableColor()
 	{
 		return new java.awt.Color(255, 60, 60);
-	}
-
-	@ConfigItem(
-		keyName = "highlightEquipItems",
-		name = "Highlight Task Items",
-		description = "Outline items your tasks need (gear, tools) in your inventory, bank and shops",
-		section = taskSection,
-		position = 8
-	)
-	default boolean highlightEquipItems()
-	{
-		return true;
 	}
 
 	// ── World Map ────────────────────────────────────────────────────────

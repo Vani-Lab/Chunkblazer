@@ -26,10 +26,6 @@
 
 package com.chunkblazer;
 
-import java.awt.BasicStroke;
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.Stroke;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -137,30 +133,5 @@ public class TaskArchive
 		{
 			configManager.setRSProfileConfiguration(CONFIG_GROUP, key, String.join(",", updated));
 		}
-	}
-
-	/**
-	 * A small closed book: a cover, a spine, and page edges. Filled (solid cover) when
-	 * the task is archived, outlined when it isn't. (x, y) is the top-left corner.
-	 */
-	public static void drawBook(Graphics2D graphics, int x, int y, int width, int height, Color color, boolean filled)
-	{
-		Stroke previous = graphics.getStroke();
-		graphics.setStroke(new BasicStroke(1.2f));
-		graphics.setColor(color);
-		if (filled)
-		{
-			graphics.fillRect(x, y, width, height);
-			graphics.setColor(new Color(20, 18, 15));
-			graphics.drawLine(x + 2, y, x + 2, y + height);
-			graphics.drawLine(x + width - 2, y + 2, x + width - 2, y + height - 2);
-		}
-		else
-		{
-			graphics.drawRect(x, y, width, height);
-			graphics.drawLine(x + 2, y, x + 2, y + height);
-			graphics.drawLine(x + width - 2, y + 2, x + width - 2, y + height - 2);
-		}
-		graphics.setStroke(previous);
 	}
 }
