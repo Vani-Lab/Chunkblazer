@@ -54,6 +54,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
 import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
@@ -259,7 +260,6 @@ public class TaskTargetHighlighter extends Overlay
 	private final ChunkBlazerConfig config;
 	private final ModelOutlineRenderer outlineRenderer;
 	private final TaskArchive archive;
-	private final TaskItemOverlay itemOverlay;
 
 	// The task auto-tracking last put in the task box. If the tracked task is anything
 	// else, the player chose it, and auto-tracking leaves it alone.
@@ -279,6 +279,9 @@ public class TaskTargetHighlighter extends Overlay
 	private Map<Rule, List<NuzlockeTask>> npcRules = Collections.emptyMap();
 	private Map<Rule, List<NuzlockeTask>> objectRules = Collections.emptyMap();
 	private Map<Integer, List<NuzlockeTask>> bossRegionTasks = Collections.emptyMap();
+	// For the inventory Tasks menu: the live tasks, and equip tasks by the gear's item id.
+	private List<NuzlockeTask> liveTasks = Collections.emptyList();
+	private Map<Integer, List<NuzlockeTask>> itemTasks = Collections.emptyMap();
 
 	// Name/options per id (fixed per id, kept for the session) and the resulting
 	// task list per id (cleared whenever the index is rebuilt).
@@ -295,8 +298,7 @@ public class TaskTargetHighlighter extends Overlay
 
 	@Inject
 	public TaskTargetHighlighter(Client client, ChunkBlazerPlugin plugin, ChunkBlazerConfig config,
-		ModelOutlineRenderer outlineRenderer, TaskArchive archive, Gson gson,
-		TaskItemOverlay itemOverlay)
+		ModelOutlineRenderer outlineRenderer, TaskArchive archive, Gson gson)
 	{
 		Tables tables = loadTables(gson);
 		BOSS_ENTRANCES.putAll(tables.bossEntrances);
@@ -305,7 +307,6 @@ public class TaskTargetHighlighter extends Overlay
 		{
 			BOSS_REGIONS.add(entrance.region);
 		}
-		this.itemOverlay = itemOverlay;
 		this.client = client;
 		this.plugin = plugin;
 		this.config = config;
@@ -337,6 +338,8 @@ public class TaskTargetHighlighter extends Overlay
 		npcRules = Collections.emptyMap();
 		objectRules = Collections.emptyMap();
 		bossRegionTasks = Collections.emptyMap();
+		liveTasks = Collections.emptyList();
+		itemTasks = Collections.emptyMap();
 		objectInfoCache.clear();
 		npcInfoCache.clear();
 		objectMatchCache.clear();
@@ -384,6 +387,8 @@ public class TaskTargetHighlighter extends Overlay
 		Map<Rule, List<NuzlockeTask>> npcRuleMap = new HashMap<>();
 		Map<Rule, List<NuzlockeTask>> objectRuleMap = new HashMap<>();
 		Map<Integer, List<NuzlockeTask>> bossTasks = new HashMap<>();
+		List<NuzlockeTask> live = new ArrayList<>();
+		Map<Integer, List<NuzlockeTask>> items = new HashMap<>();
 
 		Set<String> archived = archive.ids();
 		for (NuzlockeTask task : plugin.getActiveTasks())
@@ -392,6 +397,20 @@ public class TaskTargetHighlighter extends Overlay
 			if (task == null || task.isCompleted() || archived.contains(task.getTaskId()))
 			{
 				continue;
+			}
+			live.add(task);
+			if ("EQUIP".equalsIgnoreCase(task.getCompletionType()) && task.getRequiredItems() != null)
+			{
+				for (RequiredItem item : task.getRequiredItems())
+				{
+					if (item != null && item.getItemIds() != null)
+					{
+						for (Integer id : item.getItemIds())
+						{
+							addTask(items, id, task);
+						}
+					}
+				}
 			}
 
 			if (!BOSS_ENTRANCES.isEmpty() && task.getTaskId() != null)
@@ -467,6 +486,8 @@ public class TaskTargetHighlighter extends Overlay
 		npcRules = npcRuleMap;
 		objectRules = objectRuleMap;
 		bossRegionTasks = bossTasks;
+		liveTasks = live;
+		itemTasks = items;
 		objectMatchCache.clear();
 		npcMatchCache.clear();
 		if (objectsChanged)
@@ -944,10 +965,33 @@ public class TaskTargetHighlighter extends Overlay
 			&& "examine".equalsIgnoreCase(Text.removeTags(entry.getOption()));
 	}
 
-	/** Tasks listed on this inventory item: tools, bones and equip gear (see TaskItemOverlay). */
+	/**
+	 * Tasks listed on this inventory item: tools and bones by the item's name (knife: fletching,
+	 * tinderbox: firemaking... see TaskTargetExtras.matchesItem) plus equip gear by exact id.
+	 */
 	private List<NuzlockeTask> tasksForItem(int itemId)
 	{
-		return itemOverlay.tasksFor(itemId);
+		List<NuzlockeTask> result = new ArrayList<>();
+		ItemComposition item = client.getItemDefinition(itemId);
+		String name = item == null || item.getName() == null ? "" : item.getName().toLowerCase().trim();
+		if (!name.isEmpty() && !"null".equals(name))
+		{
+			for (NuzlockeTask task : liveTasks)
+			{
+				if (TaskTargetExtras.matchesItem(task, name))
+				{
+					result.add(task);
+				}
+			}
+		}
+		for (NuzlockeTask task : itemTasks.getOrDefault(itemId, Collections.emptyList()))
+		{
+			if (!result.contains(task))
+			{
+				result.add(task);
+			}
+		}
+		return result;
 	}
 
 	// --- Auto-tracking -------------------------------------------------------

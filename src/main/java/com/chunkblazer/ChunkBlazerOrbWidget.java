@@ -26,7 +26,7 @@
 
 package com.chunkblazer;
 
-import java.awt.image.BufferedImage;
+import lombok.extern.slf4j.Slf4j;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.FontID;
@@ -44,6 +44,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.util.ImageUtil;
 
+@Slf4j
 public class ChunkBlazerOrbWidget
 {
 	private final Client client;
@@ -54,6 +55,7 @@ public class ChunkBlazerOrbWidget
 	private final TaskBrowserOverlay taskBrowser;
 
 	private final int bossTokenOrbSpriteID = -900;
+	private final int pointsOrbSpriteID = -901;
 
 	private Widget bossTokenOrb = null;
 	private Widget bossTokenText = null;
@@ -130,10 +132,11 @@ public class ChunkBlazerOrbWidget
 				parentOrbsWidget.getParent().revalidate();
 			}
 			bossTokenOrb = parentOrbsWidget.createChild(-1, WidgetType.LAYER);
-			bossTokenText = createOrbWidget(bossTokenOrb, bossTokenOrbSpriteID, null, bossOrbX, bossOrbY, flip);
+			bossTokenText = createOrbWidget(bossTokenOrb, bossTokenOrbSpriteID, bossOrbX, bossOrbY, flip);
 			pointsOrb = parentOrbsWidget.createChild(-1, WidgetType.LAYER);
-			pointsText = createOrbWidget(pointsOrb, -1, "Pts", pointsOrbX, pointsOrbY, flip);
-			makeTaskButton(pointsOrb);
+			pointsText = createOrbWidget(pointsOrb, pointsOrbSpriteID, pointsOrbX, pointsOrbY, flip);
+			makeTaskButton(pointsOrb, "Tasks", taskBrowser::toggle);
+			makeTaskButton(bossTokenOrb, "Saved tasks", taskBrowser::toggleSavedPane);
 			wikiWidget = client.getWidget(InterfaceID.Orbs.WIKI);
 			if (wikiWidget != null)
 			{
@@ -150,8 +153,8 @@ public class ChunkBlazerOrbWidget
 		}
 	}
 
-	/** Clicking the Points orb opens the task window, like the Leagues orb. */
-	private void makeTaskButton(Widget orb)
+	/** Makes an orb clickable, like the Leagues orb: Points opens the task window, Boss Tokens the saved list. */
+	private void makeTaskButton(Widget orb, String action, Runnable onClick)
 	{
 		Widget[] parts = orb.getDynamicChildren();
 		if (parts == null || parts.length == 0)
@@ -160,10 +163,10 @@ public class ChunkBlazerOrbWidget
 		}
 		Widget frame = parts[0];
 		frame.setName("<col=ff9040>ChunkBlazer</col>");
-		frame.setAction(0, "Tasks");
+		frame.setAction(0, action);
 		frame.setHasListener(true);
 		frame.setNoClickThrough(true);
-		frame.setOnOpListener((JavaScriptCallback) event -> taskBrowser.toggle());
+		frame.setOnOpListener((JavaScriptCallback) event -> onClick.run());
 		// Light up on hover, like the game's own minimap orbs.
 		frame.setOnMouseOverListener((JavaScriptCallback) event ->
 		{
@@ -178,8 +181,8 @@ public class ChunkBlazerOrbWidget
 		frame.revalidate();
 	}
 
-	/** One orb: frame, value text, and either an icon sprite or (when {@code label} is set) a short text label. */
-	private Widget createOrbWidget(Widget widget, int iconSpriteID, String label, int x, int y, boolean flip)
+	/** One orb: frame, value text and an icon sprite. */
+	private Widget createOrbWidget(Widget widget, int iconSpriteID, int x, int y, boolean flip)
 	{
 		Widget backing = widget.createChild(-1, WidgetType.GRAPHIC);
 		backing.setFlippedHorizontally(flip);
@@ -209,22 +212,8 @@ public class ChunkBlazerOrbWidget
 		text.setOriginalHeight(13);
 		text.revalidate();
 
-		Widget icon;
-		if (label != null)
-		{
-			icon = widget.createChild(-1, WidgetType.TEXT);
-			icon.setText(label);
-			icon.setTextShadowed(true);
-			icon.setTextColor(0xFF981F);
-			icon.setFontId(FontID.BOLD_12);
-			icon.setXTextAlignment(WidgetTextAlignment.CENTER);
-			icon.setYTextAlignment(WidgetTextAlignment.CENTER);
-		}
-		else
-		{
-			icon = widget.createChild(-1, WidgetType.GRAPHIC);
-			icon.setSpriteId(iconSpriteID);
-		}
+		Widget icon = widget.createChild(-1, WidgetType.GRAPHIC);
+		icon.setSpriteId(iconSpriteID);
 		icon.setOriginalWidth(26);
 		icon.setOriginalHeight(26);
 		if (flip)
@@ -327,15 +316,30 @@ public class ChunkBlazerOrbWidget
 		cleanup();
 		bossTokenOrb = bossTokenText = pointsOrb = pointsText = wikiWidget = null;
 		client.getSpriteOverrides().remove(bossTokenOrbSpriteID);
+		client.getSpriteOverrides().remove(pointsOrbSpriteID);
 	}
 
 	// Registered here, not in the constructor: plugins are injected at client load even when disabled
 	public void startUp()
 	{
-		BufferedImage bossTokenOrbIcon = ImageUtil.loadImageResource(ChunkBlazerPlugin.class, "boss_token_icon.png");
-		client.getSpriteOverrides().put(bossTokenOrbSpriteID, ImageUtil.getImageSpritePixels(bossTokenOrbIcon, client));
 		eventBus.register(this);
 		taskBrowser.startUp();
+		sprite(bossTokenOrbSpriteID, "boss_token_icon.png");
+		// The ChunkBlazer logo (the fire in a square) on the Points orb.
+		sprite(pointsOrbSpriteID, "points_orb_icon.png");
 		addOrbWidgets();
+	}
+
+	/** An orb icon from resources; a missing image just leaves that orb blank. */
+	private void sprite(int id, String file)
+	{
+		try
+		{
+			client.getSpriteOverrides().put(id, ImageUtil.getImageSpritePixels(ImageUtil.loadImageResource(ChunkBlazerPlugin.class, file), client));
+		}
+		catch (RuntimeException e)
+		{
+			log.warn("Orb icon {} missing", file, e);
+		}
 	}
 }
