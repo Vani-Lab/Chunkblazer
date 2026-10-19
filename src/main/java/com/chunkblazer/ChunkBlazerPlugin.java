@@ -284,6 +284,9 @@ public class ChunkBlazerPlugin extends Plugin
 	private ChunkBlazerPanel panel;
 	private NavigationButton navButton;
 	private volatile int lastRegionId = -1;
+	// Where the player stands before a mode is locked: the Casual start chunk. lastRegionId
+	// waits for a mode, so it was still -1 then and the start chunk was silently skipped.
+	private volatile int preModeRegionId = -1;
 	private final Random random = new Random();
 
 	/** Handle for the periodic save-state sync; cancelled on shutDown(). */
@@ -968,6 +971,10 @@ public class ChunkBlazerPlugin extends Plugin
 		// Walking into chunks (free unlocks, unlock popups) waits for a mode too.
 		if (!modeReady)
 		{
+			if (!client.isInInstancedRegion())
+			{
+				preModeRegionId = player.getWorldLocation().getRegionID();
+			}
 			return;
 		}
 
@@ -2711,7 +2718,7 @@ public class ChunkBlazerPlugin extends Plugin
 		// For Casual mode, unlock the current chunk the player is standing in
 		if (mode == GameMode.CASUAL)
 		{
-			int currentRegion = getCurrentRegionId();
+			int currentRegion = preModeRegionId > 0 ? preModeRegionId : getCurrentRegionId();
 
 			if (currentRegion > 0 && !isRegionUnlocked(currentRegion))
 			{
