@@ -57,7 +57,7 @@ public class TaskCompletionAnimationOverlay extends Overlay
 	private static final long BAR = 1000;
 	private static final long OPEN = 2500;
 	private static final long HOLD_END = 6500;
-	private static final long TOTAL = 9000;
+	static final long TOTAL = 9000;
 	private static final Font NAME_FONT = new Font("Verdana", Font.BOLD, 11);
 	private static final Font VALUE_FONT = new Font("Verdana", Font.PLAIN, 10);
 	private static final Color SHADOW = new Color(0, 0, 0, 180);
