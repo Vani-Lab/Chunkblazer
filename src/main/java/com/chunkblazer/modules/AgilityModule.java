@@ -38,11 +38,14 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.MenuAction;
+import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.Skill;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.StatChanged;
 import net.runelite.client.eventbus.Subscribe;
@@ -84,8 +87,8 @@ public class AgilityModule extends AbstractTaskModule
 	private static final int SHORTCUT_XP_THRESHOLD = 5;
 
 	// After clicking a watched obstacle we wait this many ticks for proof the
-	// player ACTUALLY used it (an animation or an Agility XP gain). Covers walking
-	// to the obstacle. If nothing confirms in time the click is dropped — so a
+	// player ACTUALLY used it (an animation or an Agility XP gain), counted from
+	// when they stop walking to it. If nothing confirms in time the click is dropped — so a
 	// misclick they walk away from, or a shortcut they lack the level for (neither
 	// produces an animation/XP), never credits.
 	private static final int TRAVERSAL_TIMEOUT_TICKS = 12;
@@ -110,6 +113,9 @@ public class AgilityModule extends AbstractTaskModule
 	// clicks away (cancels), or on timeout.
 	private int pendingObjectId = -1;
 	private int pendingTick = -1;
+	private WorldPoint lastPosition;
+	private boolean animatedThisTick;
+	private int hitTick = -1;
 
 	// Obstacle id -> tick it was last credited (see REUSE_COOLDOWN_TICKS).
 	private final Map<Integer, Integer> lastCreditTick = new ConcurrentHashMap<>();
@@ -220,6 +226,28 @@ public class AgilityModule extends AbstractTaskModule
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		if (animatedThisTick && hitTick != client.getTickCount())
+		{
+			confirmPendingTraversal("animation");
+		}
+		animatedThisTick = false;
+
+		// A log balance plays no animation, only a balancing walk, and some give no XP
+		// either (Tlati Rainforest). That walk is the proof.
+		Player me = client.getLocalPlayer();
+		if (pendingObjectId > 0 && me != null && balancing(me))
+		{
+			confirmPendingTraversal("pose");
+		}
+
+		// Still walking to the clicked obstacle: the wait starts once they get there, so a
+		// shortcut clicked from across the screen with no run energy still counts.
+		WorldPoint at = me != null ? me.getWorldLocation() : null;
+		if (pendingObjectId > 0 && at != null && !at.equals(lastPosition))
+		{
+			pendingTick = client.getTickCount();
+		}
+		lastPosition = at;
 
 		// Expire a pending click that never got confirmed (e.g. the player lacked
 		// the level — no animation/XP ever fires). Prevents a much-later unrelated
@@ -241,32 +269,23 @@ public class AgilityModule extends AbstractTaskModule
 		}
 
 		MenuAction action = event.getMenuAction();
-		int objectId = event.getId();
+		boolean objectClick = GAME_OBJECT_ACTIONS.contains(action);
+		// The repaired Mausoleum bridge is clicked by its multiloc id, but the task lists the
+		// repaired look. Matching the look also keeps the broken or Build forms from counting.
+		int objectId = objectClick && !watchedObjectIds.contains(event.getId()) ? shownId(event.getId()) : event.getId();
 
 		// Cancel a pending traversal if the player clicks away before using the
 		// obstacle — a walk somewhere, an attack, or a different object. (Auto-walk
 		// to the clicked obstacle does NOT fire its own click, so any click here
 		// other than re-selecting the same obstacle means "I changed my mind".)
-		boolean reSelectingPending = GAME_OBJECT_ACTIONS.contains(action) && objectId == pendingObjectId;
+		boolean reSelectingPending = objectClick && objectId == pendingObjectId;
 		if (pendingObjectId > 0 && !reSelectingPending)
 		{
 			pendingObjectId = -1;
 			pendingTick = -1;
 		}
 
-		if (!GAME_OBJECT_ACTIONS.contains(action))
-		{
-			return;
-		}
-		String option = event.getMenuOption();
-
-		// Diagnostic: log the REAL runtime object id for any agility obstacle /
-		// shortcut clicked while a task is active — even unwatched ones (objectless
-		// shortcuts have no watched ids at all). Do the shortcut in-game and read
-		// the id here, then put it in the task's required_object. This is how to
-		// reconcile the "wiki id doesn't line up with what the client reports" gap.
-
-		if (watchedObjectIds.isEmpty() || !watchedObjectIds.contains(objectId))
+		if (!objectClick || !watchedObjectIds.contains(objectId))
 		{
 			return;
 		}
@@ -283,7 +302,7 @@ public class AgilityModule extends AbstractTaskModule
 	 * The player started an animation — proof they're actually performing the
 	 * obstacle they just clicked. Works for obstacles that award NO Agility XP
 	 * (stepping stones, pipes), which an XP gate can't catch. Confirms the pending
-	 * traversal; a misclick the player walks away from, or one they lack the level
+	 * traversal at the end of the tick; a misclick the player walks away from, or one they lack the level
 	 * for, never animates, so it never credits.
 	 */
 	@Subscribe
@@ -302,7 +321,28 @@ public class AgilityModule extends AbstractTaskModule
 		{
 			return; // animation reset to idle, not the start of an obstacle anim
 		}
-		confirmPendingTraversal("animation " + local.getAnimation());
+		// A swing at something we're fighting isn't the obstacle. Judged at the end of the
+		// tick, once any hit on us is known: the flinch from a chicken's peck isn't a fence
+		// jump either (Niddy).
+		animatedThisTick |= !(local.getInteracting() instanceof NPC);
+	}
+
+	/** Moving in a pose that isn't one of the player's own: balancing on a log or a rope. */
+	private static boolean balancing(Player p)
+	{
+		int pose = p.getPoseAnimation();
+		return pose != -1 && pose != p.getIdlePoseAnimation() && pose != p.getWalkAnimation()
+			&& pose != p.getRunAnimation() && pose != p.getWalkRotate180() && pose != p.getWalkRotateLeft()
+			&& pose != p.getWalkRotateRight() && pose != p.getIdleRotateLeft() && pose != p.getIdleRotateRight();
+	}
+
+	@Subscribe
+	public void onHitsplatApplied(HitsplatApplied event)
+	{
+		if (event.getActor() == client.getLocalPlayer())
+		{
+			hitTick = client.getTickCount();
+		}
 	}
 
 	/**

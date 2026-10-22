@@ -10,7 +10,9 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.StatChanged;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.game.ItemManager;
@@ -323,6 +325,45 @@ class ObtainModuleTest extends AbstractTaskModuleTest
 		when(bagContainer.getItems()).thenReturn(new Item[]{i2});
 		obtainModule.onStatChanged(new StatChanged(Skill.FLETCHING, 10, 1, 1));
 		assertEquals(15, task.getCurrentProgress(), "made straight into the bag");
+	}
+
+	private static final int BOW_STRING = 1777;
+
+	private void spool(int count)
+	{
+		when(client.getVarbitValue(VarbitID.BOWSTRING_SPOOL_CHARGES)).thenReturn(count);
+		VarbitChanged e = new VarbitChanged();
+		e.setVarbitId(VarbitID.BOWSTRING_SPOOL_CHARGES);
+		e.setValue(count);
+		obtainModule.onVarbitChanged(e);
+	}
+
+	/**
+	 * dotzo: flax spun straight onto a bowstring spool never reaches the pack; the spool
+	 * keeps a count. That count rising with Crafting XP is a bowstring spun, whichever of
+	 * the two arrives first, and taking them back off the spool nets to zero.
+	 */
+	@Test
+	void bowstringSpool()
+	{
+		NuzlockeTask task = skillingTask("CRAFTING", Skill.CRAFTING, BOW_STRING, 100);
+
+		spool(1);
+		obtainModule.onStatChanged(new StatChanged(Skill.CRAFTING, 15, 1, 1));
+		obtainModule.onGameTick(new GameTick());
+		assertEquals(1, task.getCurrentProgress());
+
+		obtainModule.onStatChanged(new StatChanged(Skill.CRAFTING, 30, 1, 1));
+		spool(2);
+		obtainModule.onGameTick(new GameTick());
+		assertEquals(2, task.getCurrentProgress());
+
+		Item takenOff = item(BOW_STRING, 2);
+		when(inventoryContainer.getItems()).thenReturn(new Item[]{takenOff});
+		spool(0);
+		obtainModule.onItemContainerChanged(new ItemContainerChanged(InventoryID.INV, inventoryContainer));
+		obtainModule.onGameTick(new GameTick());
+		assertEquals(2, task.getCurrentProgress());
 	}
 
 	/** Moving made items from the pack into a bag nets to zero, so nothing is credited. */

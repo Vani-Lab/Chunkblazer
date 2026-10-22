@@ -28,6 +28,7 @@ package com.chunkblazer.modules;
 
 import com.google.common.collect.ImmutableSet;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -37,6 +38,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.inject.Inject;
 import javax.inject.Singleton;
+import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.Hitsplat;
@@ -47,22 +49,20 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.Player;
-import net.runelite.api.Scene;
 import net.runelite.api.Skill;
-import net.runelite.api.Tile;
-import net.runelite.api.TileItem;
-import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
-import net.runelite.api.events.ItemSpawned;
 import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ServerNpcLoot;
+import net.runelite.client.game.ItemStack;
 import net.runelite.client.game.NPCManager;
+import net.runelite.client.util.Text;
 import com.chunkblazer.ChunkBlazerConfig;
 import com.chunkblazer.NuzlockeTask;
 import com.chunkblazer.TargetNpc;
@@ -321,13 +321,8 @@ public class NPCKillModule extends AbstractTaskModule
 	private final Map<String, PendingDropKill> pendingDropKills = new ConcurrentHashMap<>();
 	// How many ticks after NPC death we'll still credit a drop. Needs to cover
 	// the full death animation + server loot delay (observed at ~7 ticks for
-	// goblins, can be higher for larger NPCs). Set generously — false-positives
-	// are blocked by ownership/distance checks anyway.
+	// goblins, can be higher for larger NPCs). Only the server's loot for the kill counts.
 	private static final int PENDING_DROP_TIMEOUT_TICKS = 20; // ~12s
-	// Per-event freshness check inside onItemSpawned. Must be >= the longest
-	// realistic death-animation-to-loot delay in OSRS. 5 was too tight (goblins
-	// alone hit 7); 15 covers all known cases including larger boss death anims.
-	private static final int DROP_SPAWN_FRESHNESS_TICKS = 15; // ~9s
 
 	// NPC deaths queued for end-of-tick processing.
 	// Why: ActorDeath can fire BEFORE the killing blow's HitsplatApplied on same-tick
@@ -398,7 +393,6 @@ public class NPCKillModule extends AbstractTaskModule
 		final DeathRecord death;
 		final List<Integer> requiredItemIds;
 		final int requiredQuantity;
-		int collectedQuantity = 0;
 
 		PendingDropKill(NuzlockeTask task, DeathRecord death,
 						List<Integer> requiredItemIds, int requiredQuantity)
@@ -654,9 +648,8 @@ public class NPCKillModule extends AbstractTaskModule
 
 				if (elapsed > PENDING_DROP_TIMEOUT_TICKS)
 				{
-					String dropName = pending.task.getConstraints().getDroppedItem();
-					String reason = String.format("Required drop '%s' was not received (collected %d/%d)",
-						dropName, pending.collectedQuantity, pending.requiredQuantity);
+					String reason = String.format("Required drop '%s' was not received",
+						pending.task.getConstraints().getDroppedItem());
 
 					sendTaskFailure(pending.task, reason);
 
@@ -1047,147 +1040,55 @@ public class NPCKillModule extends AbstractTaskModule
 		}
 	}
 
-	@Subscribe
-	public void onItemSpawned(ItemSpawned event)
+	// Loot the game's own loot tracker says a kill gave us, kept briefly so a kill decided
+	// after its loot arrived still finds it. Ground items can't prove a drop: one the player
+	// drops on the death tile is theirs too (dotzo's ranarr seed under a moss giant).
+	private final List<ServerDrop> serverLoot = new ArrayList<>();
+
+	@Value
+	private static class ServerDrop
 	{
-		if (pendingDropKills.isEmpty())
-		{
-			return;
-		}
+		String npcName;
+		Collection<ItemStack> items;
+		int tick;
+	}
 
-		TileItem item = event.getItem();
-		WorldPoint itemLocation = event.getTile().getWorldLocation();
-		int itemId = item.getId();
-		int quantity = item.getQuantity();
-		int ownership = item.getOwnership();
-		int currentTick = client.getTickCount();
+	@Subscribe
+	public void onServerNpcLoot(ServerNpcLoot event)
+	{
+		serverLoot.add(new ServerDrop(Text.removeTags(event.getComposition().getName()), event.getItems(),
+			client.getTickCount()));
+		claimServerLoot();
+	}
 
-		// Check all pending drop kills
-		Iterator<Map.Entry<String, PendingDropKill>> it = pendingDropKills.entrySet().iterator();
+	/** Credit each waiting drop kill whose NPC's loot, since it died, holds the drop. */
+	private void claimServerLoot()
+	{
+		int now = client.getTickCount();
+		serverLoot.removeIf(d -> now - d.tick > PENDING_DROP_TIMEOUT_TICKS || d.tick > now);
+		Iterator<PendingDropKill> it = pendingDropKills.values().iterator();
 		while (it.hasNext())
 		{
-			Map.Entry<String, PendingDropKill> entry = it.next();
-			PendingDropKill pending = entry.getValue();
-
-			// OWNERSHIP CHECK: Must be our drop (OWNERSHIP_SELF only - no group ironmen in this mode)
-			// OWNERSHIP_NONE (0) = public, OWNERSHIP_SELF (1) = ours, OWNERSHIP_OTHER (2) = someone else's
-			if (ownership != TileItem.OWNERSHIP_SELF)
+			PendingDropKill pending = it.next();
+			for (ServerDrop drop : serverLoot)
 			{
-				continue;
-			}
-
-			// TIMING CHECK: drops can lag the death event by the full death
-			// animation + server loot delay. Goblins observed at ~7 ticks;
-			// larger NPCs are higher. Use the constant rather than a literal.
-			int ticksSinceDeath = currentTick - pending.death.deathTick;
-			if (ticksSinceDeath > DROP_SPAWN_FRESHNESS_TICKS)
-			{
-				continue;
-			}
-
-			// LOCATION CHECK: Item must spawn at or very near the death location (within 1 tile)
-			// NPC drops spawn at the NPC's location, so this should be exact or 1 tile away
-			int distance = itemLocation.distanceTo(pending.death.deathLocation);
-			if (distance > 1)
-			{
-				continue;
-			}
-
-			// Check if this is one of the required items
-			if (!pending.requiredItemIds.contains(itemId))
-			{
-				continue;
-			}
-
-			// Found a matching drop that belongs to us!
-			pending.collectedQuantity += quantity;
-
-			// Check if we've collected enough
-			if (pending.collectedQuantity >= pending.requiredQuantity)
-			{
-				String dropName = pending.task.getConstraints().getDroppedItem();
-
-				// Send progress to chatbox
-				String details = String.format("Killed %s and received %s drop",
-					pending.death.npcName, dropName);
-				sendTaskProgress(pending.task, details);
-
-				// Credit the kill
-				sendKillReport(pending.death, pending.task);
-				incrementTaskProgress(pending.task, 1);
-
-				it.remove();
+				int got = 0;
+				for (ItemStack stack : drop.items)
+				{
+					got += pending.requiredItemIds.contains(stack.getId()) ? stack.getQuantity() : 0;
+				}
+				if (got >= pending.requiredQuantity && drop.tick >= pending.death.deathTick
+					&& drop.npcName.equalsIgnoreCase(pending.death.npcName))
+				{
+					sendTaskProgress(pending.task, String.format("Killed %s and received %s drop",
+						pending.death.npcName, pending.task.getConstraints().getDroppedItem()));
+					sendKillReport(pending.death, pending.task);
+					incrementTaskProgress(pending.task, 1);
+					it.remove();
+					break;
+				}
 			}
 		}
-	}
-	/**
-	 * Check ground items at a specific location for matching item IDs.
-	 * Only counts items that belong to us (OWNERSHIP_SELF).
-	 *
-	 * @param location The world location to check
-	 * @param requiredItemIds List of item IDs we're looking for
-	 * @return Total quantity of matching items found that belong to us
-	 */
-	private int checkGroundItemsAtLocation(WorldPoint location, List<Integer> requiredItemIds)
-	{
-		int totalFound = 0;
-
-		// Convert world point to local point for tile lookup
-		LocalPoint localPoint = LocalPoint.fromWorld(client, location);
-		if (localPoint == null)
-		{
-			return 0;
-		}
-
-		// Get the scene and tile
-		Scene scene = client.getScene();
-		Tile[][][] tiles = scene.getTiles();
-		int plane = location.getPlane();
-
-		// Convert local point to scene coordinates
-		int sceneX = localPoint.getSceneX();
-		int sceneY = localPoint.getSceneY();
-
-		// Bounds check
-		if (sceneX < 0 || sceneX >= tiles[plane].length ||
-			sceneY < 0 || sceneY >= tiles[plane][sceneX].length)
-		{
-			return 0;
-		}
-
-		Tile tile = tiles[plane][sceneX][sceneY];
-		if (tile == null)
-		{
-			return 0;
-		}
-
-		// Check ground items on this tile
-		List<TileItem> groundItems = tile.getGroundItems();
-		if (groundItems == null || groundItems.isEmpty())
-		{
-			return 0;
-		}
-
-		for (TileItem item : groundItems)
-		{
-			int itemId = item.getId();
-			int ownership = item.getOwnership();
-			int quantity = item.getQuantity();
-
-			// Only count items that belong to us
-			if (ownership != TileItem.OWNERSHIP_SELF)
-			{
-				continue;
-			}
-
-			// Check if this is one of the required items
-			if (requiredItemIds.contains(itemId))
-			{
-				totalFound += quantity;
-			}
-		}
-
-		return totalFound;
 	}
 
 	@Subscribe
@@ -1241,7 +1142,7 @@ public class NPCKillModule extends AbstractTaskModule
 		// held death's NPC handle may already be a despawned husk reporting id=-1.
 
 		// Check all active tasks for a match
-		List<NuzlockeTask> matchingTasks = mostSpecificMatches(findMatchingTasks(death));
+		List<NuzlockeTask> matchingTasks = mostSpecificMatches(findMatchingTasks(death), death.npcName);
 
 		if (matchingTasks.isEmpty())
 		{
@@ -1401,35 +1302,10 @@ public class NPCKillModule extends AbstractTaskModule
 			// If task has a dropped item constraint, check for the drop
 			if (hasDropConstraint)
 			{
-				WorldPoint deathLocation = death.deathLocation;
-				List<Integer> requiredItemIds = constraints.getDroppedItemIds();
-				int requiredQuantity = constraints.getDroppedItemQuantity();
-				String dropName = constraints.getDroppedItem();
-
-				// IMMEDIATELY check if the item is already on the ground at the death location
-				// (ItemSpawned might have fired BEFORE ActorDeath in the same tick)
-				int foundQuantity = checkGroundItemsAtLocation(deathLocation, requiredItemIds);
-
-				if (foundQuantity >= requiredQuantity)
-				{
-					// Send progress to chatbox
-					String details = String.format("Killed %s and received %s drop", death.npcName, dropName)
-						+ killTimeSuffix(fight, death.deathTick);
-					sendTaskProgress(task, details);
-
-					// Credit the kill immediately
-					sendKillReport(death, task);
-					incrementTaskProgress(task, 1);
-					continue;
-				}
-
-				// Item not found yet - add to pending and wait for ItemSpawned event
-				PendingDropKill pending = new PendingDropKill(
-					task, death, requiredItemIds, requiredQuantity);
-				pending.collectedQuantity = foundQuantity; // Track what we already found
-				pendingDropKills.put(task.getTaskId(), pending);
-
-				// Don't credit the kill yet - wait for the drop to appear
+				// Wait for the server's loot for this kill (it may already be here).
+				pendingDropKills.put(task.getTaskId(), new PendingDropKill(task, death,
+					constraints.getDroppedItemIds(), constraints.getDroppedItemQuantity()));
+				claimServerLoot();
 				continue;
 			}
 
@@ -1511,8 +1387,12 @@ public class NPCKillModule extends AbstractTaskModule
 	 * Conditional tasks are narrowed per KIND of condition too: the timed "Defeat a
 	 * Mountain Troll fast" (8 ids) took every mountain troll kill from "Defeat a Troll
 	 * on Task" (58 ids), so the on-task task never saw one.
+	 *
+	 * A broader task named for the monster killed still counts: a level 63 Ogre is an
+	 * Ogre, so it credits "Defeat an Ogre" as well as "Defeat a Level 63 Ogre" (Sebarak).
+	 * An Ogress isn't called Ogre, so it still only counts for the Ogress task.
 	 */
-	List<NuzlockeTask> mostSpecificMatches(List<NuzlockeTask> matches)
+	List<NuzlockeTask> mostSpecificMatches(List<NuzlockeTask> matches, String npcName)
 	{
 		if (matches.size() <= 1)
 		{
@@ -1526,7 +1406,7 @@ public class NPCKillModule extends AbstractTaskModule
 		List<NuzlockeTask> out = new ArrayList<>();
 		for (List<NuzlockeTask> kind : byKind.values())
 		{
-			out.addAll(narrowest(kind));
+			out.addAll(narrowest(kind, npcName));
 		}
 		return out;
 	}
@@ -1539,8 +1419,8 @@ public class NPCKillModule extends AbstractTaskModule
 			+ (has && c.hasDroppedItemConstraint()) + (has && c.hasVarbitConstraints());
 	}
 
-	/** The tasks among {@code matches} with the smallest target-NPC id set. */
-	private List<NuzlockeTask> narrowest(List<NuzlockeTask> matches)
+	/** The tasks with the smallest target-NPC id set, plus any named for the monster killed. */
+	private List<NuzlockeTask> narrowest(List<NuzlockeTask> matches, String npcName)
 	{
 		if (matches.size() <= 1)
 		{
@@ -1560,7 +1440,9 @@ public class NPCKillModule extends AbstractTaskModule
 		List<NuzlockeTask> specific = new ArrayList<>();
 		for (NuzlockeTask task : matches)
 		{
-			if (npcIdSetSize(task) == minSize)
+			TargetNpc target = task.getTargetNpc();
+			if (npcIdSetSize(task) == minSize || target != null && target.getName() != null
+				&& target.getName().equalsIgnoreCase(npcName))
 			{
 				specific.add(task);
 			}

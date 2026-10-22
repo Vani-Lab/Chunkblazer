@@ -34,6 +34,7 @@ import net.runelite.api.MenuAction;
 import java.util.Set;
 import java.util.EnumSet;
 import net.runelite.api.MessageNode;
+import net.runelite.api.ObjectComposition;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.api.ChatMessageType;
@@ -101,6 +102,17 @@ public abstract class AbstractTaskModule implements TaskCompletionModule
 		MenuAction.GAME_OBJECT_FOURTH_OPTION,
 		MenuAction.GAME_OBJECT_FIFTH_OPTION
 	);
+
+	/**
+	 * What an object looks like now. A varbit multiloc (a totem site, the Mausoleum bridge)
+	 * is clicked by its own id but shows another, and tasks list the one it shows.
+	 */
+	protected int shownId(int objectId)
+	{
+		ObjectComposition def = client.getObjectDefinition(objectId);
+		ObjectComposition shown = def != null && def.getImpostorIds() != null ? def.getImpostor() : null;
+		return shown != null ? shown.getId() : objectId;
+	}
 
 	private static final Set<Integer> TUTORIAL_ISLAND_REGIONS = ImmutableSet.of(12336, 12335, 12592, 12080, 12079, 12436);
 

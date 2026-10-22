@@ -1,6 +1,7 @@
 package com.chunkblazer.modules;
 
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.Player;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.InteractingChanged;
@@ -256,6 +257,22 @@ class NpcDialogueModuleTest extends AbstractTaskModuleTest
 		lenient().when(localPlayer.getInteracting()).thenReturn(otherNpc);
 		dialogueWith("Death");
 		assertFalse(task.isCompleted());
+	}
+
+	/** cinnammonfox: Helvia's base NPC id isn't 13319; 13319 is the form she shows. */
+	@Test
+	void transformedNpcTalk()
+	{
+		NuzlockeTask task = createTaskWithNpc("Talk to Helvia", "talk_to_helvia", "NPC_DIALOGUE", 1, Arrays.asList(13319));
+		task.getTargetNpc().setName("Helvia");
+		npcDialogueModule.addActiveTask(task);
+		NPCComposition shown = mock(NPCComposition.class);
+		lenient().when(shown.getId()).thenReturn(13319);
+		lenient().when(otherNpc.getId()).thenReturn(12345);
+		lenient().when(otherNpc.getTransformedComposition()).thenReturn(shown);
+		lenient().when(localPlayer.getInteracting()).thenReturn(otherNpc);
+		dialogueWith("Helvia");
+		assertTrue(task.isCompleted(), "she's the task NPC in the form she shows");
 	}
 
 	/** Morgan Le Faye talks the moment Sir Mordred dies, while the player is still on his corpse. */

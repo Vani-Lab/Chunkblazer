@@ -5,6 +5,7 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
@@ -15,6 +16,8 @@ import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.Hitsplat;
 import net.runelite.client.chat.ChatMessageManager;
+import net.runelite.client.events.ServerNpcLoot;
+import net.runelite.client.game.ItemStack;
 import com.chunkblazer.NuzlockeTask;
 import com.chunkblazer.TaskConstraints;
 import com.chunkblazer.api.ChunkBlazerApiClient;
@@ -1390,7 +1393,7 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 		NuzlockeTask onTask = wolfTask("Defeat a White Wolf on Task", "defeat_white_wolf_on_task", "SLAYER", null, 107, 108);
 		NuzlockeTask timed = wolfTask("Defeat a White Wolf in 12 Seconds", "defeat_white_wolf_fast", "NPC_Kill", 20, 107, 108);
 
-		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(plain, onTask, timed));
+		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(plain, onTask, timed), "White wolf");
 
 		assertTrue(credited.contains(plain), "the plain task still gets the kill");
 		assertTrue(credited.contains(onTask));
@@ -1399,12 +1402,12 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 
 	/** Beefaros: the timed Mountain Troll task took every mountain troll kill from "Troll on Task". */
 	@Test
-	void differentConditionsDontStarveEachOther()
+	void conditionsDontStarve()
 	{
 		NuzlockeTask onTask = wolfTask("Defeat a Troll on Task", "defeat_troll_on_task", "SLAYER", null, 936, 937, 938, 4135, 4136);
 		NuzlockeTask timed = wolfTask("Defeat a Mountain Troll in 15 Seconds", "defeat_mountain_troll_fast", "NPC_Kill", 25, 936, 937);
 
-		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(onTask, timed));
+		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(onTask, timed), "Mountain troll");
 
 		assertTrue(credited.contains(onTask), "the on-task troll task still gets the kill");
 		assertTrue(credited.contains(timed));
@@ -1416,10 +1419,27 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 	{
 		NuzlockeTask ogre = wolfTask("Defeat an Ogre", "defeat_ogre", "NPC_Kill", null, 136, 1153, 7989, 7990);
 		NuzlockeTask ogress = wolfTask("Defeat an Ogress", "defeat_ogress", "NPC_Kill", null, 7989, 7990);
+		ogre.getTargetNpc().setName("Ogre");
+		ogress.getTargetNpc().setName("Ogress");
 
-		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(ogre, ogress));
+		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(ogre, ogress), "Ogress Warrior");
 
 		assertEquals(Arrays.asList(ogress), credited);
+	}
+
+	/**
+	 * Sebarak: a level 63 ogre only counted for "Defeat a Level 63 Ogre", never "Defeat an
+	 * Ogre", and the 12 second task took every kill from the 24 second one. It's an Ogre.
+	 */
+	@Test
+	void sameNameCountsBoth()
+	{
+		NuzlockeTask ogre = wolfTask("Defeat an Ogre in 24 Seconds", "defeat_ogre_fast", "NPC_Kill", 40, 136, 1153, 2095);
+		NuzlockeTask level63 = wolfTask("Defeat a Level 63 Ogre in 12 Seconds", "defeat_level_63_ogre_fast", "NPC_Kill", 20, 1153);
+		ogre.getTargetNpc().setName("Ogre");
+		level63.getTargetNpc().setName("Level 63 Ogre");
+
+		assertEquals(Arrays.asList(ogre, level63), npcKillModule.mostSpecificMatches(Arrays.asList(ogre, level63), "Ogre"));
 	}
 
 	// --- Hidden health bar (BlazeIWill's hill giant, Pyro's flinching) -------------
@@ -1537,5 +1557,64 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 		npcKillModule.onGameTick(new GameTick());
 
 		assertEquals(1, moss.getCurrentProgress());
+	}
+
+	// --- Drop tasks: only the server's loot for the kill counts -----------------
+
+	private static final int MOSS_GIANT = 2090;
+	private static final int RANARR_SEED = 5295;
+
+	private NuzlockeTask ranarrFromMossGiant()
+	{
+		NuzlockeTask task = createTaskWithNpc("Defeat a Moss Giant for some Ranarr Seeds", "moss_giant_ranarr", "NPC_KILL", 1,
+			Arrays.asList(MOSS_GIANT));
+		TaskConstraints c = new TaskConstraints();
+		c.setDroppedItem("Ranarr Seed");
+		c.setDroppedItemIds(Arrays.asList(RANARR_SEED));
+		task.setConstraints(c);
+		npcKillModule.addActiveTask(task);
+		return task;
+	}
+
+	private void serverLoot(String npc, int itemId)
+	{
+		NPCComposition comp = mock(NPCComposition.class);
+		when(comp.getName()).thenReturn(npc);
+		npcKillModule.onServerNpcLoot(new ServerNpcLoot(comp, Arrays.asList(new ItemStack(itemId, 1))));
+	}
+
+	/**
+	 * dotzo: a ranarr seed the player dropped under the dying moss giant completed the task.
+	 * Ground items aren't read any more; the loot the server reports for the kill is.
+	 */
+	@Test
+	void killLootOnly() throws Exception
+	{
+		NuzlockeTask task = ranarrFromMossGiant();
+		simulateKill(mockNpc(MOSS_GIANT, 1, "Moss giant"));
+
+		advance(4);
+		serverLoot("Moss giant", 532); // big bones, no seed
+		serverLoot("Hill Giant", RANARR_SEED); // someone else's kind of loot
+		assertEquals(0, task.getCurrentProgress());
+
+		serverLoot("Moss giant", RANARR_SEED);
+		assertEquals(1, task.getCurrentProgress());
+	}
+
+	/** Loot that lands before the kill is decided (same tick) still counts. */
+	@Test
+	void lootBeforeKill() throws Exception
+	{
+		NuzlockeTask task = ranarrFromMossGiant();
+		NPC giant = mockNpc(MOSS_GIANT, 1, "Moss giant");
+		fireMyHitsplat(giant, 10);
+		ActorDeath death = mock(ActorDeath.class);
+		when(death.getActor()).thenReturn(giant);
+		npcKillModule.onActorDeath(death);
+		serverLoot("Moss giant", RANARR_SEED);
+		npcKillModule.onGameTick(new GameTick());
+
+		assertEquals(1, task.getCurrentProgress());
 	}
 }

@@ -47,6 +47,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.MenuAction;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.Skill;
@@ -59,9 +60,11 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GraphicsObjectCreated;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.NpcChanged;
 import net.runelite.api.events.NpcDespawned;
 import net.runelite.api.events.NpcSpawned;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.chat.QueuedMessage;
@@ -528,13 +531,16 @@ public class RaidChallengeModule extends AbstractTaskModule
 
 		// (b) First hit on a defeat_npc target opens its encounter BEFORE the style check
 		// below, so the opening hit is already subject to the weapon/style/no-run rules
-		// (HM06's "Tekton, crush only" must judge the very first hit).
+		// (HM06's "Tekton, crush only" must judge the very first hit). A style target opens
+		// it too, so the Kalphite Queen's first form counts toward "Ranged only".
 		for (NuzlockeTask task : new HashSet<>(activeTasks))
 		{
 			RaidChallenge ch = task.getChallenge();
 			State s = states.get(task.getTaskId());
+			List<Integer> style = styleTargetIds(ch);
 			if (ch == null || s == null || s.encounterActive || deadTargets.contains(hitNpc)
-				|| ch.getDefeatNpcIds() == null || !ch.getDefeatNpcIds().contains(npcId))
+				|| ch.getDefeatNpcIds() == null
+				|| !ch.getDefeatNpcIds().contains(npcId) && (style == null || !style.contains(npcId)))
 			{
 				continue;
 			}
@@ -675,49 +681,73 @@ public class RaidChallengeModule extends AbstractTaskModule
 		{
 			return true;
 		}
-		if (required == CombatStyle.MELEE)
+		boolean melee = current == CombatStyle.STAB || current == CombatStyle.SLASH
+			|| current == CombatStyle.CRUSH || current == CombatStyle.MELEE;
+		if (required == CombatStyle.MELEE || current == CombatStyle.MELEE)
 		{
-			return current == CombatStyle.STAB || current == CombatStyle.SLASH
-				|| current == CombatStyle.CRUSH;
+			return melee && required != CombatStyle.RANGED && required != CombatStyle.MAGIC;
 		}
 		return current == required;
 	}
 
-	// weaponType (EQUIPPED_WEAPON_TYPE ordinal) -> the damage style of each of its
-	// attack-style options, indexed by the ATTACK_STYLE varp (0..3). Verified live
-	// where noted; the rest are the standard OSRS combat options. Anything absent
-	// resolves to UNKNOWN (logged), never a wrong guess.
+	// Weapon category (COMBAT_WEAPON_CATEGORY) -> the damage style of each combat option,
+	// indexed by the COM_MODE varp. Categories and their options come from the game's own
+	// WEAPON_STYLES enum, damage types from the wiki: a 3-option weapon's defensive option
+	// is index 3 (2 is unused) and a staff's spell is 4. MELEE marks a melee weapon whose
+	// stab/slash/crush mix isn't mapped. Anything absent resolves to UNKNOWN.
 	private static final Map<Integer, CombatStyle[]> WEAPON_STYLES = buildWeaponStyles();
 
 	private static Map<Integer, CombatStyle[]> buildWeaponStyles()
 	{
-		CombatStyle STAB = CombatStyle.STAB, SLASH = CombatStyle.SLASH,
-			CRUSH = CombatStyle.CRUSH, RANGED = CombatStyle.RANGED, MAGIC = CombatStyle.MAGIC;
+		CombatStyle STAB = CombatStyle.STAB, SLASH = CombatStyle.SLASH, CRUSH = CombatStyle.CRUSH,
+			RANGED = CombatStyle.RANGED, MAGIC = CombatStyle.MAGIC, MELEE = CombatStyle.MELEE;
+		CombatStyle[] crush = {CRUSH, CRUSH, CRUSH, CRUSH};
+		CombatStyle[] ranged = {RANGED, RANGED, RANGED, RANGED};
+		CombatStyle[] magic = {MAGIC, MAGIC, MAGIC, MAGIC};
+		CombatStyle[] melee = {MELEE, MELEE, MELEE, MELEE};
+		CombatStyle[] salamander = {SLASH, RANGED, MAGIC};
 		Map<Integer, CombatStyle[]> m = new java.util.HashMap<>();
-		m.put(0,  new CombatStyle[]{CRUSH, CRUSH, CRUSH});                 // UNARMED
-		m.put(1,  new CombatStyle[]{SLASH, SLASH, CRUSH, SLASH});          // AXE
-		m.put(2,  new CombatStyle[]{CRUSH, CRUSH, CRUSH});                 // BLUNT (mace/warhammer)
-		m.put(3,  new CombatStyle[]{RANGED, RANGED, RANGED});             // BOW
-		m.put(4,  new CombatStyle[]{SLASH, SLASH, STAB, SLASH});           // CLAW
-		m.put(5,  new CombatStyle[]{RANGED, RANGED, RANGED});             // CROSSBOW
-		m.put(7,  new CombatStyle[]{RANGED, RANGED, RANGED});             // CHINCHOMPA
-		m.put(9,  new CombatStyle[]{SLASH, SLASH, STAB, SLASH});           // SLASH_SWORD (scimitar/longsword)
-		m.put(10, new CombatStyle[]{SLASH, SLASH, CRUSH, SLASH});          // TWO_HANDED_SWORD
-		m.put(11, new CombatStyle[]{STAB, STAB, CRUSH, STAB});            // PICKAXE
-		m.put(12, new CombatStyle[]{STAB, SLASH, STAB});                  // POLEARM (halberd: Jab/Swipe/Fend)
-		m.put(13, new CombatStyle[]{CRUSH, CRUSH, CRUSH});               // POLESTAFF
-		m.put(14, new CombatStyle[]{SLASH, SLASH, CRUSH, SLASH});          // SCYTHE
-		m.put(15, new CombatStyle[]{STAB, SLASH, CRUSH, STAB});           // SPEAR / hasta
-		m.put(16, new CombatStyle[]{CRUSH, CRUSH, STAB, CRUSH});          // SPIKED (e.g. some maces)
-		m.put(17, new CombatStyle[]{STAB, STAB, SLASH, STAB});            // STAB_SWORD (dagger/rapier/Fang) — style 1 verified live
-		m.put(19, new CombatStyle[]{SLASH, SLASH, SLASH});               // WHIP
-		m.put(22, new CombatStyle[]{CRUSH, CRUSH, CRUSH});               // BLUDGEON
+		m.put(0, crush);                                          // unarmed
+		m.put(1, new CombatStyle[]{SLASH, SLASH, CRUSH, SLASH});  // axe
+		m.put(2, crush);                                          // blunt
+		m.put(3, ranged);                                         // bow
+		m.put(4, new CombatStyle[]{SLASH, SLASH, STAB, SLASH});   // claw
+		m.put(5, ranged);                                         // crossbow
+		m.put(6, salamander);
+		m.put(7, ranged);                                         // chinchompa
+		m.put(9, new CombatStyle[]{SLASH, SLASH, STAB, SLASH});   // slash sword
+		m.put(10, new CombatStyle[]{SLASH, SLASH, CRUSH, SLASH}); // 2h sword
+		m.put(11, new CombatStyle[]{STAB, STAB, CRUSH, STAB});    // pickaxe
+		m.put(12, new CombatStyle[]{STAB, SLASH, STAB, STAB});    // polearm
+		m.put(13, crush);                                         // polestaff
+		m.put(14, new CombatStyle[]{SLASH, SLASH, CRUSH, SLASH}); // scythe
+		m.put(15, new CombatStyle[]{STAB, SLASH, CRUSH, STAB});   // spear
+		m.put(16, new CombatStyle[]{CRUSH, CRUSH, STAB, CRUSH});  // spiked
+		m.put(17, new CombatStyle[]{STAB, STAB, SLASH, STAB});    // stab sword
+		m.put(18, new CombatStyle[]{CRUSH, CRUSH, CRUSH, CRUSH, MAGIC});  // staff
+		m.put(19, ranged);                                        // thrown (blowpipe, darts)
+		m.put(20, new CombatStyle[]{SLASH, SLASH, SLASH, SLASH}); // whip
+		m.put(21, new CombatStyle[]{STAB, SLASH, CRUSH, CRUSH, MAGIC});   // bladed staff
+		m.put(24, magic);                                         // powered staff (trident)
+		m.put(27, crush);                                         // bludgeon
+		m.put(29, magic);
+		m.put(31, salamander);
+		m.put(37, magic);
+		for (int c : new int[]{23, 25, 26, 28, 30, 32, 34, 35, 36})
+		{
+			m.put(c, melee);
+		}
 		return m;
 	}
 
 	/** The player's current damage style, or UNKNOWN for an unmapped weapon type. */
 	private CombatStyle currentCombatStyle()
 	{
+		// A spell cast by hand hits a few ticks later, in whatever stance the weapon is in.
+		if (client.getTickCount() - castTick <= CAST_HIT_TICKS)
+		{
+			return CombatStyle.MAGIC;
+		}
 		int weaponType = client.getVarbitValue(EQUIPPED_WEAPON_TYPE_VARBIT);
 		int style = client.getVarpValue(ATTACK_STYLE_VARP);
 		CombatStyle[] styles = WEAPON_STYLES.get(weaponType);
@@ -726,6 +756,18 @@ public class RaidChallengeModule extends AbstractTaskModule
 			return CombatStyle.UNKNOWN;
 		}
 		return styles[style];
+	}
+
+	private static final int CAST_HIT_TICKS = 5;
+	private int castTick = -100;
+
+	@Subscribe
+	public void onMenuOptionClicked(MenuOptionClicked e)
+	{
+		if (e.getMenuAction() == MenuAction.WIDGET_TARGET_ON_NPC && "Cast".equals(e.getMenuOption()))
+		{
+			castTick = client.getTickCount();
+		}
 	}
 
 	/** NPCs whose hits are style-gated ({@code style_target_ids}, legacy {@code stab_target_ids}). */
@@ -843,33 +885,56 @@ public class RaidChallengeModule extends AbstractTaskModule
 						complete(task, s);
 					}
 				}
-				// defeat_npc: the target dying is the completion signal. Qualifies if the
-				// encounter had no sustained violation and the gates/point-in-time hold.
 				else if (s.encounterActive)
 				{
-					boolean gates = gatesPass(ch);
-					boolean pit = pointInTimeOk(ch);
-					// max_defeat_ticks: the kill must land within N ticks of the first hit
-					// ("defeat a Manticore in 24 seconds"). A slow kill fails the attempt.
-					boolean tooSlow = ch.getMaxDefeatTicks() != null && s.encounterStartTick >= 0
-						&& (client.getTickCount() - s.encounterStartTick) > ch.getMaxDefeatTicks();
-					s.encounterActive = false;
-					if (!s.violated && gates && pit && !tooSlow)
-					{
-						complete(task, s);
-					}
-					else
-					{
-						if (!s.violated)
-						{
-							announceFailure(task, tooSlow
-								? "Too slow. Kill it within "
-									+ ch.getMaxDefeatTicks() + " ticks."
-								: gateFailReason(ch, pit));
-						}
-						resetAttempt(s);
-					}
+					finishEncounter(task, ch, s);
 				}
+			}
+		}
+	}
+
+	/**
+	 * defeat_npc: the target dying is the completion signal. Qualifies if the encounter
+	 * had no sustained violation and the gates/point-in-time hold.
+	 */
+	private void finishEncounter(NuzlockeTask task, RaidChallenge ch, State s)
+	{
+		boolean gates = gatesPass(ch);
+		boolean pit = pointInTimeOk(ch);
+		// max_defeat_ticks: the kill must land within N ticks of the first hit
+		// ("defeat a Manticore in 24 seconds"). A slow kill fails the attempt.
+		boolean tooSlow = ch.getMaxDefeatTicks() != null && s.encounterStartTick >= 0
+			&& (client.getTickCount() - s.encounterStartTick) > ch.getMaxDefeatTicks();
+		s.encounterActive = false;
+		if (!s.violated && gates && pit && !tooSlow)
+		{
+			complete(task, s);
+		}
+		else
+		{
+			if (!s.violated)
+			{
+				announceFailure(task, tooSlow
+					? "Too slow. Kill it within "
+						+ ch.getMaxDefeatTicks() + " ticks."
+					: gateFailReason(ch, pit));
+			}
+			resetAttempt(s);
+		}
+	}
+
+	/** A Moon of Peril never reports a death, it flies off. Its "dead" varbit is the kill (dotzo). */
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged e)
+	{
+		for (NuzlockeTask task : new HashSet<>(activeTasks))
+		{
+			RaidChallenge ch = task.getChallenge();
+			State s = states.get(task.getTaskId());
+			if (ch != null && s != null && s.encounterActive && e.getValue() > 0
+				&& Integer.valueOf(e.getVarbitId()).equals(ch.getDefeatVarbit()))
+			{
+				finishEncounter(task, ch, s);
 			}
 		}
 	}
@@ -925,6 +990,8 @@ public class RaidChallengeModule extends AbstractTaskModule
 	@Subscribe
 	public void onNpcChanged(NpcChanged e)
 	{
+		// A boss that "dies" into its next form (the Kalphite Queen) is alive again.
+		deadTargets.remove(e.getNpc());
 		if (isFinalWarden(e.getNpc().getId()))
 		{
 			finalWarden = e.getNpc();

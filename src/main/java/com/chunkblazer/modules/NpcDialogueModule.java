@@ -36,6 +36,7 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.Player;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.InteractingChanged;
@@ -237,11 +238,21 @@ public class NpcDialogueModule extends AbstractTaskModule
 		}
 		Player me = client.getLocalPlayer();
 		Actor target = me != null ? me.getInteracting() : null;
-		if (target instanceof NPC && watchedNpcIds.contains(((NPC) target).getId()))
+		return target instanceof NPC ? watchedId((NPC) target) : -1;
+	}
+
+	/**
+	 * The watched id this NPC answers to, or -1. getId() is the base NPC; one that changes
+	 * with quest progress (Helvia) shows a transformed id, which is what the task lists.
+	 */
+	private int watchedId(NPC npc)
+	{
+		if (watchedNpcIds.contains(npc.getId()))
 		{
-			return ((NPC) target).getId();
+			return npc.getId();
 		}
-		return -1;
+		NPCComposition shown = npc.getTransformedComposition();
+		return shown != null && watchedNpcIds.contains(shown.getId()) ? shown.getId() : -1;
 	}
 
 	/** The name of the NPC speaking in the dialogue box (lower case), or null. */
@@ -265,7 +276,7 @@ public class NpcDialogueModule extends AbstractTaskModule
 	{
 		Player me = client.getLocalPlayer();
 		Actor target = me != null ? me.getInteracting() : null;
-		return target instanceof NPC && !target.isDead() && !watchedNpcIds.contains(((NPC) target).getId());
+		return target instanceof NPC && !target.isDead() && watchedId((NPC) target) < 0;
 	}
 
 	@Subscribe
@@ -279,10 +290,9 @@ public class NpcDialogueModule extends AbstractTaskModule
 		// Check if the player is interacting with a watched NPC
 		if (event.getSource() == client.getLocalPlayer() && event.getTarget() instanceof NPC)
 		{
-			NPC npc = (NPC) event.getTarget();
-			int npcId = npc.getId();
+			int npcId = watchedId((NPC) event.getTarget());
 
-			if (watchedNpcIds.contains(npcId))
+			if (npcId > 0)
 			{
 				lastInteractionNpcId = npcId;
 				lastInteractionTick = client.getTickCount();

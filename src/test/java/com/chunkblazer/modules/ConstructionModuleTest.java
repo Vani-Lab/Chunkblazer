@@ -5,6 +5,7 @@ import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
 import net.runelite.api.GroundObject;
 import net.runelite.api.MenuAction;
+import net.runelite.api.ObjectComposition;
 import net.runelite.api.Skill;
 import net.runelite.api.WallObject;
 import net.runelite.api.events.DecorativeObjectSpawned;
@@ -419,6 +420,35 @@ class ConstructionModuleTest extends AbstractTaskModuleTest
 	 * landed with "recent spawns: []"). The Build menu click on the watched
 	 * object id, followed by Construction XP, is the detection path.
 	 */
+	/**
+	 * Task Blazer: building a Vale totem gives Fletching XP (Construction only with a
+	 * house), and the site never spawns anything; it only shows its wood once built.
+	 */
+	@Test
+	void valeTotemBuild()
+	{
+		NuzlockeTask oak = createTaskWithRequiredObject("Build an Oak Totem", "build_oak_totem", "CONSTRUCTION", 1,
+			Arrays.asList(57065, 57066, 57067, 57068, 57069));
+		NuzlockeTask willow = createTaskWithRequiredObject("Build a Willow Totem", "build_willow_totem", "CONSTRUCTION", 1,
+			Arrays.asList(57070, 57071, 57072, 57073, 57074));
+		constructionModule.addActiveTask(oak);
+		constructionModule.addActiveTask(willow);
+		ObjectComposition site = mock(ObjectComposition.class);
+		ObjectComposition built = mock(ObjectComposition.class);
+		lenient().when(client.getObjectDefinition(57016)).thenReturn(site);
+		lenient().when(site.getImpostorIds()).thenReturn(new int[]{57064, 57066, 57070});
+		lenient().when(site.getImpostor()).thenReturn(built);
+		lenient().when(built.getId()).thenReturn(57066);
+
+		currentTick = 100;
+		constructionModule.onMenuOptionClicked(buildClick(57016));
+		currentTick = 103;
+		constructionModule.onStatChanged(new StatChanged(Skill.FLETCHING, 1000, 30, 30));
+
+		assertTrue(oak.isCompleted(), "the site now shows an oak totem");
+		assertFalse(willow.isCompleted());
+	}
+
 	@Test
 	void stashBuildClickThenXpCredits_NoSpawnEverFires()
 	{

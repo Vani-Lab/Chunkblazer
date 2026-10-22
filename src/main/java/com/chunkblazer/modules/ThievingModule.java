@@ -58,7 +58,7 @@ import com.chunkblazer.TargetNpc;
  *      guard and then stealing from a stall can't pass the stall's XP off as a pickpocket.
  *   2. GameObject thefts (stalls, chests) — task has required_object; we track MenuOptionClicked
  *      on watched object IDs.
- * Either path gates a credit on a Thieving XP gain inside INTERACTION_TIMEOUT_TICKS of the
+ * Either path gates a credit on a Thieving XP gain inside CLICK_TIMEOUT_TICKS of the
  * recorded interaction. Tasks with neither requirement no longer auto-credit — the old
  * "credit any thieving XP to no-NPC tasks" fallback caused one stall theft to complete every
  * unrelated stall task simultaneously.
@@ -71,11 +71,10 @@ public class ThievingModule extends AbstractTaskModule
 	// Minimum XP gain to count as successful pickpocket
 	private static final int MIN_XP_THRESHOLD = 1;
 
-	// How many ticks after interacting with an NPC we consider XP gains as pickpockets
-	private static final int INTERACTION_TIMEOUT_TICKS = 5;
-	// A chest is walked to, then searched for traps before the XP lands (Chaos Druid
-	// Tower), so an object click waits longer. Any other click still disarms it.
-	private static final int OBJECT_TIMEOUT_TICKS = 20;
+	// How long a click waits for its Thieving XP. A chest is walked to and searched for traps
+	// first (Chaos Druid Tower), a guard who wanders off is chased (Hosidius). Any other
+	// click still disarms it.
+	private static final int CLICK_TIMEOUT_TICKS = 20;
 	private static final Set<MenuAction> NPC_ACTIONS = EnumSet.of(
 		MenuAction.NPC_FIRST_OPTION, MenuAction.NPC_SECOND_OPTION, MenuAction.NPC_THIRD_OPTION,
 		MenuAction.NPC_FOURTH_OPTION, MenuAction.NPC_FIFTH_OPTION);
@@ -290,10 +289,10 @@ public class ThievingModule extends AbstractTaskModule
 
 			int currentTick = client.getTickCount();
 			boolean recentNpc = lastInteractionNpcId > 0 &&
-				(currentTick - lastInteractionTick) <= INTERACTION_TIMEOUT_TICKS &&
+				(currentTick - lastInteractionTick) <= CLICK_TIMEOUT_TICKS &&
 				watchedNpcIds.contains(lastInteractionNpcId);
 			boolean recentObject = lastInteractionObjectId > 0 &&
-				(currentTick - lastInteractionObjectTick) <= OBJECT_TIMEOUT_TICKS &&
+				(currentTick - lastInteractionObjectTick) <= CLICK_TIMEOUT_TICKS &&
 				watchedObjectIds.contains(lastInteractionObjectId);
 
 			// If both fired, the more recent one wins — protects against e.g. clicking a stall
@@ -312,6 +311,9 @@ public class ThievingModule extends AbstractTaskModule
 
 			if (recentNpc)
 			{
+				// A distracted wealthy citizen is pickpocketed over and over from one
+				// click, so each steal keeps the click alive for the next.
+				lastInteractionTick = currentTick;
 				for (NuzlockeTask task : new HashSet<>(activeTasks))
 				{
 					Set<Integer> taskNpcs = taskTargetNpcs.get(task.getTaskId());

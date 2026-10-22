@@ -4,7 +4,7 @@ Visit the [Chunkblazer](https://chunkblazer.com) website for more info!
 
 ChunkBlazer is a Randomized, Automated, Task rolling [RuneLite](https://github.com/runelite/runelite) plugin for Old School RuneScape.
 
-The world is carved into "Chunks": 64×64-tile squares of the map. You start with a single chunk and earn points by completing random tasks inside the chunks you already own. Spend those points to buy new chunks and grow your world one piece at a time.
+The Runescape map is carved into 64x64 tile regions called chunks. You start with a single chunk and earn points by completing random tasks rolled to you. Spend those points to buy new chunks and grow your world one piece at a time.
 
 # How to Play Video
 
@@ -13,12 +13,12 @@ The world is carved into "Chunks": 64×64-tile squares of the map. You start wit
 # Data & the ChunkBlazer server
 
 ChunkBlazer is a server-backed plugin. We send data over HTTPS to
-`api.chunkblazer.com` it **syncs your progress** (unlocked chunks, completed
-tasks, points, game mode, keyed to a hashed RSN) for saves, leaderboards, and
+`api.chunkblazer.com` which **syncs your account progress** for saves, leaderboards, and
 completion verification. It also **downloads** the task catalog and completion
-sounds, cached locally and revalidated so they're pulled
-only when they change. Nothing is shared with third parties, and you can play
-offline by disabling server verification. Full detail in [PRIVACY.md](PRIVACY.md).
+sounds. Nothing is shared with third parties, and you can play
+offline by disabling server verification. 
+
+Full privacy policy details here: [PRIVACY.md](PRIVACY.md).
 
 # Acknowledgements
 

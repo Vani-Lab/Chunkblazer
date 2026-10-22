@@ -372,6 +372,10 @@ public class RaidChallenge
 	@SerializedName("defeat_npc_ids")
 	private List<Integer> defeatNpcIds;
 
+	/** A varbit set when the target dies, for one that never reports a death (the Moons of Peril). */
+	@SerializedName("defeat_varbit")
+	private Integer defeatVarbit;
+
 	/**
 	 * With {@link #defeatNpcIds}: require this many of the target NPCs to die within a
 	 * short window of each other ("kill two at the same time"). The window defaults to

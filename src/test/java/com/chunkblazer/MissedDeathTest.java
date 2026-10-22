@@ -55,7 +55,7 @@ class MissedDeathTest
 	}
 
 	@Test
-	void unreportedDeathIsReplayedToTheModules()
+	void missedDeathReplayed()
 	{
 		when(npcUtil.isDying(npc)).thenReturn(true);
 		plugin.onNpcDespawned(new NpcDespawned(npc));
@@ -63,7 +63,7 @@ class MissedDeathTest
 	}
 
 	@Test
-	void reportedDeathIsNotCountedTwice()
+	void deathNotDoubled()
 	{
 		plugin.onActorDeath(new ActorDeath(npc));
 		plugin.onNpcDespawned(new NpcDespawned(npc));
@@ -71,7 +71,7 @@ class MissedDeathTest
 	}
 
 	@Test
-	void despawnWithoutDyingIsNotADeath()
+	void despawnNotDeath()
 	{
 		when(npcUtil.isDying(npc)).thenReturn(false);
 		plugin.onNpcDespawned(new NpcDespawned(npc));

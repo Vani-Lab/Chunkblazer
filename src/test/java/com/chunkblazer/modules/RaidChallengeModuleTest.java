@@ -20,6 +20,7 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
+import net.runelite.api.events.NpcChanged;
 import net.runelite.api.events.NpcDespawned;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.chat.ChatMessageManager;
@@ -134,6 +135,47 @@ class RaidChallengeModuleTest extends AbstractTaskModuleTest
 		NuzlockeTask t = addTask("cox_ice_carving", c -> c.setDefeatNpcIds(Arrays.asList(ICE_DEMON)));
 		fireDeath(ICE_DEMON); // it dies but we never engaged it (no hit → no encounter)
 		assertFalse(t.isCompleted(), "a kill we took no part in must not credit");
+	}
+
+	/**
+	 * dotzo: the Kalphite Queen's first form (963) dies and turns into the flying form
+	 * (965), the same NPC. A task that also targets 963 (Buck-Fifty) marked it dead, and
+	 * the mark outlived the transform, so no challenge could start on the second form.
+	 */
+	@Test
+	void transformedBossEncounter()
+	{
+		addTask("kq_buck_fifty", c -> { c.setDefeatNpcIds(Arrays.asList(963, 965)); c.setMinHitsplat(150); });
+		NuzlockeTask blade = addTask("kq_colossal_blade", c -> c.setDefeatNpcIds(Arrays.asList(965)));
+		NPC queen = npc(963);
+		fireHit(963);
+		fireDeath(963);
+		lenient().when(queen.getId()).thenReturn(965);
+		npcs.put(965, queen);
+		module.onNpcChanged(new NpcChanged(queen, null));
+		encounterKill(965);
+		assertTrue(blade.isCompleted(), "the flying form's kill completes the challenge");
+	}
+
+	/** dotzo: "Ranged only" ignored the first form, since only the flying form opened the fight. */
+	@Test
+	void styleRuleFirstForm()
+	{
+		NuzlockeTask ranged = addTask("kq_insect_repellent", c -> {
+			c.setDefeatNpcIds(Arrays.asList(965));
+			c.setStyleTargetIds(Arrays.asList(963, 965));
+			c.setRequiredAttackStyle("RANGED");
+		});
+		NPC queen = npc(963);
+		setCombatStyle(2, 0); // crush on the first form
+		fireHit(963);
+		fireDeath(963);
+		lenient().when(queen.getId()).thenReturn(965);
+		npcs.put(965, queen);
+		module.onNpcChanged(new NpcChanged(queen, null));
+		setCombatStyle(3, 0); // ranged on the flying form
+		encounterKill(965);
+		assertFalse(ranged.isCompleted(), "meleeing the first form fails Ranged only");
 	}
 
 	// ── max_defeat_ticks (Chili's Triple Dipper: "defeat a Manticore in 24s / 40 ticks") ──
@@ -675,6 +717,78 @@ class RaidChallengeModuleTest extends AbstractTaskModuleTest
 		fireHit(TEKTON);       // first hit is ranged → violation
 		fireDeath(TEKTON);
 		assertFalse(t.isCompleted(), "MELEE rejects a RANGED hit on the target");
+	}
+
+	/** dotzo: a Moon of Peril flies off instead of dying; its "dead" varbit is the kill. */
+	@Test
+	void moonVarbit()
+	{
+		assertEquals(Integer.valueOf(9859), new com.google.gson.Gson().fromJson(
+			"{\"taskID\":\"x\",\"challenge\":{\"defeat_varbit\":9859}}", NuzlockeTask.class).getChallenge().getDefeatVarbit());
+		NuzlockeTask t = addTask("moons_of_peril_icebreaker", c -> {
+			c.setDefeatNpcIds(Arrays.asList(TEKTON));
+			c.setDefeatVarbit(9859);
+		});
+		fireHit(TEKTON);
+		net.runelite.api.events.VarbitChanged other = new net.runelite.api.events.VarbitChanged();
+		other.setVarbitId(9858);
+		other.setValue(1);
+		module.onVarbitChanged(other); // a different moon
+		assertFalse(t.isCompleted());
+
+		net.runelite.api.events.VarbitChanged dead = new net.runelite.api.events.VarbitChanged();
+		dead.setVarbitId(9859);
+		dead.setValue(1);
+		module.onVarbitChanged(dead);
+		assertTrue(t.isCompleted());
+	}
+
+	/** Blade Laser: Rex killed with Earth Bolt from a staff completed "Choking the King". */
+	@Test
+	void staffSpell()
+	{
+		NuzlockeTask t = addTask("dk_choking_the_king", c -> {
+			c.setDefeatNpcIds(Arrays.asList(TEKTON));
+			c.setStyleTargetIds(Arrays.asList(TEKTON));
+			c.setRequiredAttackStyle("MELEE");
+		});
+		setCombatStyle(18, 4); // staff, autocasting
+		fireHit(TEKTON);
+		fireDeath(TEKTON);
+		assertFalse(t.isCompleted());
+	}
+
+	/** A spell cast by hand reads as the weapon's melee stance; the cast says magic. */
+	@Test
+	void manualCast()
+	{
+		NuzlockeTask t = addTask("dk_choking_the_king", c -> {
+			c.setDefeatNpcIds(Arrays.asList(TEKTON));
+			c.setStyleTargetIds(Arrays.asList(TEKTON));
+			c.setRequiredAttackStyle("MELEE");
+		});
+		setCombatStyle(17, 0); // stab sword, in a melee stance
+		net.runelite.api.events.MenuOptionClicked cast = mock(net.runelite.api.events.MenuOptionClicked.class);
+		when(cast.getMenuAction()).thenReturn(net.runelite.api.MenuAction.WIDGET_TARGET_ON_NPC);
+		when(cast.getMenuOption()).thenReturn("Cast");
+		module.onMenuOptionClicked(cast);
+		fireHit(TEKTON);
+		fireDeath(TEKTON);
+		assertFalse(t.isCompleted());
+	}
+
+	/** A blowpipe (thrown, category 19) is ranged; it used to read as a whip's slash. */
+	@Test
+	void blowpipeRanged()
+	{
+		NuzlockeTask t = addTask("kq_ranged_only", c -> {
+			c.setDefeatNpcIds(Arrays.asList(TEKTON));
+			c.setStyleTargetIds(Arrays.asList(TEKTON));
+			c.setRequiredAttackStyle("RANGED");
+		});
+		setCombatStyle(19, 1);
+		encounterKill(TEKTON);
+		assertTrue(t.isCompleted());
 	}
 
 	// ── gear value (Please Carry Me / Pulling the Bootstraps) ────────────────

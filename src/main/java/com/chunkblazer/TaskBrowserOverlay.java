@@ -759,6 +759,11 @@ public class TaskBrowserOverlay extends Overlay
 	private final Set<String> sideFolded = ConcurrentHashMap.newKeySet();
 	private String sideKey = "";
 	private boolean sideAdded;
+	// Built once, then added to whichever panel is current. Turning the plugin off and on
+	// makes a new panel, but this overlay is a singleton, so sideAdded alone left it empty.
+	private JComponent sideStatsBox;
+	private JComponent sideControlsBox;
+	private ChunkBlazerPanel sideHost;
 	private volatile int sideHover = -1;
 	// Points, Chunks, Tasks and Tokens, each in its own black-edged box.
 	private static final String[] STAT_NAMES = {"Points", "Chunks", "Tasks", "Tokens"};
@@ -855,16 +860,27 @@ public class TaskBrowserOverlay extends Overlay
 				stats.add(box);
 			}
 			stats.setMaximumSize(new Dimension(Integer.MAX_VALUE, stats.getPreferredSize().height));
-			panel.addTaskList(stats);
-			panel.addTaskList(sideControls());
+			sideStatsBox = stats;
+			sideControlsBox = sideControls();
 			sideFold.addActionListener(e ->
 			{
 				sideFilterBox.setVisible(!sideFilterBox.isVisible());
 				sideSync();
-				panel.revalidate();
+				ChunkBlazerPanel now = plugin.getPanel();
+				if (now != null)
+				{
+					now.revalidate();
+				}
 			});
+		}
+		if (sideAdded && panel != null && panel != sideHost)
+		{
+			sideHost = panel;
+			panel.addTaskList(sideStatsBox);
+			panel.addTaskList(sideControlsBox);
 			panel.addTaskList(sideList);
 			panel.setOldSchool();
+			sideKey = "";
 		}
 		if (!sideList.isShowing())
 		{
@@ -1732,16 +1748,18 @@ public class TaskBrowserOverlay extends Overlay
 	private List<NuzlockeTask> pool(boolean includeGlobal)
 	{
 		List<NuzlockeTask> pool = new ArrayList<>();
+		// The account's completed list, not just each card's flag: a completion that
+		// arrived another way (the login merge) left Cectli Snow's card showing as active.
+		Set<String> completed = plugin.getCompletedTaskIdSet();
 		for (NuzlockeTask task : plugin.getActiveTasks())
 		{
-			if (task != null && task.getTaskId() != null && !task.isCompleted())
+			if (task != null && task.getTaskId() != null && !task.isCompleted() && !completed.contains(task.getTaskId()))
 			{
 				pool.add(task);
 			}
 		}
 		if (includeGlobal)
 		{
-			Set<String> completed = plugin.getCompletedTaskIdSet();
 			for (NuzlockeTask task : plugin.getVisibleGlobalTasks())
 			{
 				if (task != null && task.getTaskId() != null && !completed.contains(task.getTaskId()))

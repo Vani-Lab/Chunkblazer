@@ -197,7 +197,7 @@ class ThievingModuleTest extends AbstractTaskModuleTest
 
 	/** Verictorga: walking to a Chaos Druid Tower chest and searching it took longer than 5 ticks. */
 	@Test
-	void chestSearchedAfterAWalkStillCounts()
+	void chestAfterWalk()
 	{
 		NuzlockeTask chest = createTaskWithRequiredObject(
 			"Steal from the Chaos Druid Tower Chest", "steal_chaos_druid_tower_chest", "THIEVING", 1, Collections.singletonList(11738));
@@ -262,7 +262,7 @@ class ThievingModuleTest extends AbstractTaskModuleTest
 	@Test
 	void testStallTheft_LateXpDoesNotCredit()
 	{
-		// If the XP gain arrives more than OBJECT_TIMEOUT_TICKS (20) after the click,
+		// If the XP gain arrives more than CLICK_TIMEOUT_TICKS (20) after the click,
 		// it must not be associated with that click.
 		NuzlockeTask seedTask = createTaskWithRequiredObject(
 			"Steal from a Seed Stall", "steal_seed_stall", "THIEVING", 1, Collections.singletonList(SEED_STALL_ID));
@@ -317,9 +317,39 @@ class ThievingModuleTest extends AbstractTaskModuleTest
 		verify(completionCallback).onProgressUpdated(eq(task), eq(1));
 	}
 
+	/** Erik: a Hosidius guard who wandered off was chased for more than 5 ticks before the steal. */
+	@Test
+	void guardChase()
+	{
+		NuzlockeTask task = guardTask();
+		when(client.getTickCount()).thenReturn(100);
+		thievingModule.onMenuOptionClicked(npcClick(VARROCK_GUARD, "Pickpocket"));
+		when(client.getTickCount()).thenReturn(112);
+		thievingModule.onStatChanged(mockThievingXp(1040));
+		verify(completionCallback).onProgressUpdated(eq(task), eq(1));
+	}
+
+	/** Sinespe: a distracted wealthy citizen is auto-pickpocketed long after the one click. */
+	@Test
+	void autoPickpocketChain()
+	{
+		NuzlockeTask task = createTaskWithNpc("Pickpocket a Wealthy Citizen", "pickpocket_wealthy_citizen", "THIEVING", 30,
+			Collections.singletonList(VARROCK_GUARD));
+		when(client.getSkillExperience(Skill.THIEVING)).thenReturn(1000);
+		thievingModule.addActiveTask(task);
+		when(client.getTickCount()).thenReturn(100);
+		thievingModule.onMenuOptionClicked(npcClick(VARROCK_GUARD, "Pickpocket"));
+		for (int i = 1; i <= 8; i++)
+		{
+			when(client.getTickCount()).thenReturn(100 + i * 2);
+			thievingModule.onStatChanged(mockThievingXp(1000 + i * 100));
+		}
+		verify(completionCallback).onProgressUpdated(eq(task), eq(8));
+	}
+
 	/** Sydlo: Dig Site workmen are pickpocketed with "Steal-from", not "Pickpocket". */
 	@Test
-	void stealFromDigsiteWorkmanCredits()
+	void digsiteStealFrom()
 	{
 		NuzlockeTask task = createTaskWithNpc("Pickpocket a Digsite Worker", "pickpocket_digsite_worker", "THIEVING", 1,
 			Collections.singletonList(3628));
