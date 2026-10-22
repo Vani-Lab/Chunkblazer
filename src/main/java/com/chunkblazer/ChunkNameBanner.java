@@ -157,7 +157,8 @@ public class ChunkNameBanner extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.showChunkNamePopups())
+		// Not on Tutorial Island, where the tutorial does the talking.
+		if (!config.showChunkNamePopups() || plugin.isOnTutorialIsland())
 		{
 			phase = Phase.HIDDEN;
 			pending = null;

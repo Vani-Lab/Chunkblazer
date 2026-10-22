@@ -41,7 +41,7 @@ public enum TaskTrackerStyle
 	/** Nothing on the game screen; the side panel shows the Selected Task box. */
 	OFF("Off"),
 	/** Net's simple box (designed by NetworkAccessViolation): name, details and a progress bar. */
-	NET("Simple overlay by Net"),
+	NET("Simple by Net"),
 	/** Vani's full box: requirements, missing levels, timers, close and archive buttons. */
 	VANI("Detailed by Vani"),
 	/** The same, as one small line: name, progress and a thin bar. */

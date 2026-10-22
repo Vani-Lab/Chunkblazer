@@ -297,6 +297,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showTaskCards",
+		hidden = true, // shown on the task window's Settings page
 		name = "Reveal New Tasks as Cards",
 		description = "New tasks arrive as face-down cards you flip to reveal",
 		section = taskSection,
@@ -308,7 +309,21 @@ public interface ChunkBlazerConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "cardEntrance",
+		hidden = true, // shown on the task window's Settings page
+		name = "Card Entrance",
+		description = "How a fresh deal of task cards arrives on screen",
+		section = taskSection,
+		position = 0
+	)
+	default CardEntrance cardEntrance()
+	{
+		return CardEntrance.DEALT;
+	}
+
+	@ConfigItem(
 		keyName = "taskTrackerStyle",
+		hidden = true, // shown on the task window's Settings page
 		name = "Task Box",
 		description = "How the task you track is shown in game. Off hides it",
 		section = taskSection,
@@ -321,6 +336,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "autoTrackTasks",
+		hidden = true, // shown on the task window's Settings page
 		name = "Auto-Track Tasks",
 		description = "Using an NPC or object a task needs tracks that task. A task you picked yourself is kept",
 		section = taskSection,
@@ -332,7 +348,21 @@ public interface ChunkBlazerConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showSavedTaskTracker",
+		hidden = true, // shown on the task window's Settings page
+		name = "Saved Tasks Bubble",
+		description = "A bubble that opens your saved tasks (Alt + drag to move)",
+		section = taskSection,
+		position = 3
+	)
+	default boolean showSavedTaskTracker()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "movableTaskBox",
+		hidden = true, // shown on the task window's Settings page
 		name = "Movable Quest/Saved Box",
 		description = "Open quest requirements and saved tasks in a box you can Alt + drag, instead of over the inventory",
 		section = taskSection,
@@ -345,6 +375,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "taskRightClickMenu",
+		hidden = true, // shown on the task window's Settings page
 		name = "Right-Click Tasks Menu",
 		description = "Adds a Tasks submenu when right-clicking NPCs and objects your tasks need",
 		section = taskSection,
@@ -370,6 +401,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "taskOutlineMode",
+		hidden = true, // shown on the task window's Settings page
 		name = "Outlines",
 		description = "Which task NPCs and objects get outlined: all, saved, doable now, or none",
 		section = taskSection,
@@ -404,6 +436,32 @@ public interface ChunkBlazerConfig extends Config
 		return new java.awt.Color(255, 60, 60);
 	}
 
+	@ConfigItem(
+		keyName = "highlightEquipItems",
+		hidden = true, // shown on the task window's Settings page
+		name = "Highlight Task Items",
+		description = "Outline items your tasks need (gear, tools) in your inventory, bank and shops",
+		section = taskSection,
+		position = 8
+	)
+	default boolean highlightEquipItems()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "taskTooltipKey",
+		hidden = true, // shown on the task window's Settings page
+		name = "Task Tooltip Key",
+		description = "Hold this key over an NPC or object to list its tasks in a tooltip",
+		section = taskSection,
+		position = 9
+	)
+	default TaskTooltipKey taskTooltipKey()
+	{
+		return TaskTooltipKey.SHIFT;
+	}
+
 	// ── World Map ────────────────────────────────────────────────────────
 
 	@ConfigSection(
@@ -415,6 +473,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showWorldMapChunks",
+		hidden = true, // shown on the task window's Settings page
 		name = "Chunk Borders",
 		description = "Draw chunk borders and tints on the world map",
 		section = worldMapSection,
@@ -429,6 +488,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showChunkCostLabels",
+		hidden = true, // shown on the task window's Settings page
 		name = "Chunk Costs",
 		description = "Show each unlockable chunk's cost (FREE, points or a Boss Token) inside it",
 		section = worldMapSection,
@@ -441,6 +501,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showChunkLegend",
+		hidden = true, // shown on the task window's Settings page
 		name = "Colour Legend",
 		description = "Show a key explaining the chunk colours in the corner of the world map",
 		section = worldMapSection,
@@ -453,6 +514,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showChunkGridLines",
+		hidden = true, // shown on the task window's Settings page
 		name = "Lines Between Unlocked Chunks",
 		description = "Outline each unlocked chunk. Off shows your unlocked area as one piece.",
 		section = worldMapSection,
@@ -551,6 +613,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showMinimapChunks",
+		hidden = true, // shown on the task window's Settings page
 		name = "Chunk Borders & Tints",
 		description = "Chunk borders and tints on the minimap. Click a neighbouring chunk to unlock it.",
 		section = minimapSection,
@@ -584,6 +647,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showSceneChunks",
+		hidden = true, // shown on the task window's Settings page
 		name = "Chunk Borders",
 		description = "Draw chunk borders on the ground in the game world",
 		section = inGameSection,
@@ -596,6 +660,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showChunkWalls",
+		hidden = true, // shown on the task window's Settings page
 		name = "Locked Chunk Walls",
 		description = "Draw a see-through wall along the border between unlocked and locked chunks",
 		section = inGameSection,
@@ -621,6 +686,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showChunkNamePopups",
+		hidden = true, // shown on the task window's Settings page
 		name = "Chunk Name Banner",
 		description = "Show a chunk's name at the top of the screen when you enter it",
 		section = inGameSection,
@@ -633,6 +699,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showTaskCompletionPopup",
+		hidden = true, // shown on the task window's Settings page
 		name = "Task Completion Popup",
 		description = "Display a popup when you complete a task",
 		section = inGameSection,
@@ -645,18 +712,11 @@ public interface ChunkBlazerConfig extends Config
 
 	// ── Sounds ───────────────────────────────────────────────────────────
 
-	@ConfigSection(
-		name = "Sounds",
-		description = "Task completion sounds and chunk unlock jingles",
-		position = 5
-	)
-	String soundSection = "sounds";
-
 	@ConfigItem(
 		keyName = "playTaskCompletionSound",
+		hidden = true, // shown on the task window's Settings page
 		name = "Task Completion Sound",
 		description = "Play a region-specific sound when you complete a task",
-		section = soundSection,
 		position = 0
 	)
 	default boolean playTaskCompletionSound()
@@ -666,9 +726,9 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "taskCompletionSoundVolume",
+		hidden = true, // shown on the task window's Settings page
 		name = "Task Sound Volume",
 		description = "Volume of the task completion sound (0 = silent, 100 = full)",
-		section = soundSection,
 		position = 1
 	)
 	@Range(min = 0, max = 100)
@@ -680,9 +740,9 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "playRegionUnlockSound",
+		hidden = true, // shown on the task window's Settings page
 		name = "Region Unlock Jingle",
 		description = "Play a region-specific jingle the first time you unlock a chunk",
-		section = soundSection,
 		position = 2
 	)
 	default boolean playRegionUnlockSound()
@@ -697,18 +757,11 @@ public interface ChunkBlazerConfig extends Config
 
 	// ── Chat Messages ────────────────────────────────────────────────────
 
-	@ConfigSection(
-		name = "Chat Messages",
-		description = "Control which task messages appear in chat",
-		position = 6
-	)
-	String chatSection = "chat";
-
 	@ConfigItem(
 		keyName = "showChatProgress",
+		hidden = true, // shown on the task window's Settings page
 		name = "Show Task Progress",
 		description = "Show messages when you make progress on a task",
-		section = chatSection,
 		position = 0
 	)
 	default boolean showChatProgress()
@@ -718,9 +771,9 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showChatSuccess",
+		hidden = true, // shown on the task window's Settings page
 		name = "Show Task Success",
 		description = "Show messages when you complete a task",
-		section = chatSection,
 		position = 1
 	)
 	default boolean showChatSuccess()
@@ -730,9 +783,9 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showChatFailed",
+		hidden = true, // shown on the task window's Settings page
 		name = "Show Task Failed",
 		description = "Show messages when a task attempt fails",
-		section = chatSection,
 		position = 2
 	)
 	default boolean showChatFailed()
@@ -751,6 +804,7 @@ public interface ChunkBlazerConfig extends Config
 
 	@ConfigItem(
 		keyName = "showUnlockPopup",
+		hidden = true, // shown on the task window's Settings page
 		name = "Show Unlock Popup",
 		description = "Show an in-game popup to unlock regions when you walk into them",
 		section = regionSection,

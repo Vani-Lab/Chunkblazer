@@ -55,7 +55,7 @@ public enum OutlineMode
 	 * All tasks: any task (normal colour if one is doable, the "level too low" colour if not).
 	 * Saved tasks: only saved ones count, coloured the same way.
 	 * Have requirements: only when one of them is doable, in the normal colour.
-	 * Used by the NPC and object outlines (TaskTargetHighlighter).
+	 * Shared by NPC and object outlines (TaskTargetHighlighter) and item outlines (TaskItemOverlay).
 	 */
 	Color color(List<NuzlockeTask> tasks, Set<String> saved, Color doable, Color unavailable,
 		Predicate<NuzlockeTask> canDo)

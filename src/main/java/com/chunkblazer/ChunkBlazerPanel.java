@@ -89,6 +89,8 @@ public class ChunkBlazerPanel extends PluginPanel
 
 	// Verification banner, shown until the account is verified via the in-game chat handshake.
 	private JPanel verificationPanel;
+	// On Tutorial Island, in place of the account setup: that waits for the mainland.
+	private JPanel tutorialPanel;
 	private JLabel verificationCodeLabel;
 
 
@@ -136,6 +138,16 @@ public class ChunkBlazerPanel extends PluginPanel
 		header.setAlignmentX(LEFT_ALIGNMENT);
 		mainPanel.add(header);
 		mainPanel.add(Box.createVerticalStrut(4));
+		tutorialPanel = boxPanel(ColorScheme.DARKER_GRAY_COLOR);
+		tutorialPanel.setAlignmentX(LEFT_ALIGNMENT);
+		frame(tutorialPanel, FLAME, 5, 6);
+		tutorialPanel.add(note("ChunkBlazer tutorial", FLAME));
+		tutorialPanel.add(note("You're on Tutorial Island: follow the tutorial in game, with practice chunks "
+			+ "and tasks worth 0 points.", Color.WHITE));
+		tutorialPanel.add(note("Server Sync and your game mode are set up once you reach Lumbridge, "
+			+ "where you can type in chat.", Color.LIGHT_GRAY));
+		tutorialPanel.setVisible(false);
+		mainPanel.add(tutorialPanel);
 		dataNoticeRow = createDataNoticeRow();
 		mainPanel.add(dataNoticeRow);
 		syncPromptPanel = createSyncPromptSection();
@@ -812,8 +824,21 @@ public class ChunkBlazerPanel extends PluginPanel
 			return;
 		}
 		boolean isLocked = plugin.isModeLocked();
-		modeSelectionPanel.setVisible(!isLocked);
-		overlayHint.setVisible(isLocked);
+		// On Tutorial Island the tutorial runs the show: its practice tasks, and the mode
+		// is picked once you reach the mainland.
+		boolean island = plugin.isOnTutorialIsland();
+		modeSelectionPanel.setVisible(!isLocked && !island);
+		tutorialPanel.setVisible(island);
+		if (island)
+		{
+			// Sync, verification and the account links all need the mainland's chat box.
+			for (JComponent c : new JComponent[]{syncPromptPanel, dataNoticeRow, verificationPanel, historyButton,
+				showKeyButton, resetAccountButton})
+			{
+				c.setVisible(false);
+			}
+		}
+		overlayHint.setVisible(isLocked || island || plugin.isTutorialPreview());
 		// Until a mode is picked the panel is only the mode picker, so no chunk either.
 		regionLabel.setVisible(isLocked);
 
@@ -824,6 +849,11 @@ public class ChunkBlazerPanel extends PluginPanel
 				new Color(255, 100, 100) : new Color(100, 200, 100);
 			modeLabel.setText(" | " + mode.getName());
 			modeLabel.setForeground(modeColor);
+		}
+		else if (island)
+		{
+			modeLabel.setText("Tutorial: pick a mode in Lumbridge");
+			modeLabel.setForeground(Color.ORANGE);
 		}
 		else
 		{
