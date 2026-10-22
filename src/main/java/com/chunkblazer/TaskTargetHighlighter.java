@@ -54,6 +54,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
 import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
@@ -65,8 +66,6 @@ import net.runelite.api.Scene;
 import net.runelite.api.Skill;
 import net.runelite.api.Tile;
 import net.runelite.api.TileObject;
-import net.runelite.api.coords.LocalPoint;
-import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.DecorativeObjectDespawned;
 import net.runelite.api.events.DecorativeObjectSpawned;
 import net.runelite.api.events.GameObjectDespawned;
@@ -85,8 +84,6 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
-import net.runelite.client.ui.overlay.tooltip.Tooltip;
-import net.runelite.client.ui.overlay.tooltip.TooltipManager;
 import net.runelite.client.util.Text;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
@@ -113,10 +110,6 @@ import net.runelite.api.gameval.InventoryID;
  * Which targets get an outline is the Outline Mode (task window cogwheel): all task
  * targets, only those of saved tasks, only those with a task you have the level
  * for, or none. The right-click Tasks menu always lists every task.
- *
- * Holding the task tooltip key (Shift by default, set on the task window's Settings page)
- * over a task target lists its tasks in a tooltip at the cursor (names, progress, and any
- * levels you're missing), without opening the right-click menu.
  *
  * Inventory tools get a Tasks menu too (knife: fletching, tinderbox: firemaking,
  * pestle and mortar: herblore...; see TaskTargetExtras.matchesItem).
@@ -267,11 +260,6 @@ public class TaskTargetHighlighter extends Overlay
 	private final ChunkBlazerConfig config;
 	private final ModelOutlineRenderer outlineRenderer;
 	private final TaskArchive archive;
-	private final TaskItemOverlay itemOverlay;
-	private final TooltipManager tooltipManager;
-
-	// Most tasks listed in the hover tooltip before it says "and N more".
-	private static final int HOVER_MAX_TASKS = 8;
 
 	// The task auto-tracking last put in the task box. If the tracked task is anything
 	// else, the player chose it, and auto-tracking leaves it alone.
@@ -291,6 +279,9 @@ public class TaskTargetHighlighter extends Overlay
 	private Map<Rule, List<NuzlockeTask>> npcRules = Collections.emptyMap();
 	private Map<Rule, List<NuzlockeTask>> objectRules = Collections.emptyMap();
 	private Map<Integer, List<NuzlockeTask>> bossRegionTasks = Collections.emptyMap();
+	// For the inventory Tasks menu: the live tasks, and equip tasks by the gear's item id.
+	private List<NuzlockeTask> liveTasks = Collections.emptyList();
+	private Map<Integer, List<NuzlockeTask>> itemTasks = Collections.emptyMap();
 
 	// Name/options per id (fixed per id, kept for the session) and the resulting
 	// task list per id (cleared whenever the index is rebuilt).
@@ -307,10 +298,8 @@ public class TaskTargetHighlighter extends Overlay
 
 	@Inject
 	public TaskTargetHighlighter(Client client, ChunkBlazerPlugin plugin, ChunkBlazerConfig config,
-		ModelOutlineRenderer outlineRenderer, TaskArchive archive, Gson gson,
-		TaskItemOverlay itemOverlay, TooltipManager tooltipManager)
+		ModelOutlineRenderer outlineRenderer, TaskArchive archive, Gson gson)
 	{
-		this.tooltipManager = tooltipManager;
 		Tables tables = loadTables(gson);
 		BOSS_ENTRANCES.putAll(tables.bossEntrances);
 		FISH.putAll(tables.fish);
@@ -318,7 +307,6 @@ public class TaskTargetHighlighter extends Overlay
 		{
 			BOSS_REGIONS.add(entrance.region);
 		}
-		this.itemOverlay = itemOverlay;
 		this.client = client;
 		this.plugin = plugin;
 		this.config = config;
@@ -350,6 +338,8 @@ public class TaskTargetHighlighter extends Overlay
 		npcRules = Collections.emptyMap();
 		objectRules = Collections.emptyMap();
 		bossRegionTasks = Collections.emptyMap();
+		liveTasks = Collections.emptyList();
+		itemTasks = Collections.emptyMap();
 		objectInfoCache.clear();
 		npcInfoCache.clear();
 		objectMatchCache.clear();
@@ -397,6 +387,8 @@ public class TaskTargetHighlighter extends Overlay
 		Map<Rule, List<NuzlockeTask>> npcRuleMap = new HashMap<>();
 		Map<Rule, List<NuzlockeTask>> objectRuleMap = new HashMap<>();
 		Map<Integer, List<NuzlockeTask>> bossTasks = new HashMap<>();
+		List<NuzlockeTask> live = new ArrayList<>();
+		Map<Integer, List<NuzlockeTask>> items = new HashMap<>();
 
 		Set<String> archived = archive.ids();
 		for (NuzlockeTask task : plugin.getActiveTasks())
@@ -405,6 +397,20 @@ public class TaskTargetHighlighter extends Overlay
 			if (task == null || task.isCompleted() || archived.contains(task.getTaskId()))
 			{
 				continue;
+			}
+			live.add(task);
+			if ("EQUIP".equalsIgnoreCase(task.getCompletionType()) && task.getRequiredItems() != null)
+			{
+				for (RequiredItem item : task.getRequiredItems())
+				{
+					if (item != null && item.getItemIds() != null)
+					{
+						for (Integer id : item.getItemIds())
+						{
+							addTask(items, id, task);
+						}
+					}
+				}
 			}
 
 			if (!BOSS_ENTRANCES.isEmpty() && task.getTaskId() != null)
@@ -449,23 +455,6 @@ public class TaskTargetHighlighter extends Overlay
 				addTask(npcRuleMap, npcRule, task);
 			}
 
-			// Where an Obtain or Equip task's item comes from (task_sources.json), by name:
-			// the NPC that drops or sells it, or the object or activity it comes from.
-			for (Rule rule : TaskSources.rules(task))
-			{
-				addTask(npcRuleMap, rule, task);
-				addTask(objectRuleMap, rule, task);
-			}
-
-			// A tutorial practice task's target, by name.
-			String practice = plugin.getPracticeTarget(task.getTaskId());
-			if (practice != null)
-			{
-				String practiceName = ChunkBlazerTutorial.letters(practice.split(":")[1]);
-				addTask(practice.startsWith("npc:") ? npcRuleMap : objectRuleMap,
-					new Rule("tutorial:" + practice, n -> ChunkBlazerTutorial.letters(n).equals(practiceName)), task);
-			}
-
 			// UI-only extras for tasks with no ids of their own (see TaskTargetExtras).
 			if (!hasOwnTargets(task))
 			{
@@ -497,6 +486,8 @@ public class TaskTargetHighlighter extends Overlay
 		npcRules = npcRuleMap;
 		objectRules = objectRuleMap;
 		bossRegionTasks = bossTasks;
+		liveTasks = live;
+		itemTasks = items;
 		objectMatchCache.clear();
 		npcMatchCache.clear();
 		if (objectsChanged)
@@ -925,7 +916,6 @@ public class TaskTargetHighlighter extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		showHoveredTasks();
 		OutlineMode mode = config.taskOutlineMode();
 		if (mode == OutlineMode.OFF)
 		{
@@ -939,7 +929,7 @@ public class TaskTargetHighlighter extends Overlay
 		{
 			for (NPC npc : client.getNpcs())
 			{
-				if (npc == null || inLockedChunk(npc.getLocalLocation()))
+				if (npc == null)
 				{
 					continue;
 				}
@@ -954,7 +944,7 @@ public class TaskTargetHighlighter extends Overlay
 		int plane = client.getPlane();
 		for (TileObject object : trackedObjects)
 		{
-			if (object.getPlane() != plane || inLockedChunk(object.getLocalLocation()))
+			if (object.getPlane() != plane)
 			{
 				continue;
 			}
@@ -967,17 +957,6 @@ public class TaskTargetHighlighter extends Overlay
 		return null;
 	}
 
-	/** True if this spot is in a chunk you haven't unlocked: its outline is hidden there. */
-	private boolean inLockedChunk(LocalPoint local)
-	{
-		if (local == null)
-		{
-			return false;
-		}
-		WorldPoint world = WorldPoint.fromLocalInstance(client, local);
-		return world != null && !plugin.isRegionUnlocked(world.getRegionID());
-	}
-
 	/** The Examine option on an item in the inventory (one per item, like NPCs and objects). */
 	private static boolean isInventoryExamine(MenuEntry entry)
 	{
@@ -986,10 +965,33 @@ public class TaskTargetHighlighter extends Overlay
 			&& "examine".equalsIgnoreCase(Text.removeTags(entry.getOption()));
 	}
 
-	/** Tasks listed on this inventory item: tools, bones and equip gear (see TaskItemOverlay). */
+	/**
+	 * Tasks listed on this inventory item: tools and bones by the item's name (knife: fletching,
+	 * tinderbox: firemaking... see TaskTargetExtras.matchesItem) plus equip gear by exact id.
+	 */
 	private List<NuzlockeTask> tasksForItem(int itemId)
 	{
-		return itemOverlay.tasksFor(itemId);
+		List<NuzlockeTask> result = new ArrayList<>();
+		ItemComposition item = client.getItemDefinition(itemId);
+		String name = item == null || item.getName() == null ? "" : item.getName().toLowerCase().trim();
+		if (!name.isEmpty() && !"null".equals(name))
+		{
+			for (NuzlockeTask task : liveTasks)
+			{
+				if (TaskTargetExtras.matchesItem(task, name))
+				{
+					result.add(task);
+				}
+			}
+		}
+		for (NuzlockeTask task : itemTasks.getOrDefault(itemId, Collections.emptyList()))
+		{
+			if (!result.contains(task))
+			{
+				result.add(task);
+			}
+		}
+		return result;
 	}
 
 	// --- Auto-tracking -------------------------------------------------------
@@ -1266,71 +1268,5 @@ public class TaskTargetHighlighter extends Overlay
 	private String levelNote(NuzlockeTask task)
 	{
 		return TaskTargetExtras.levelNote(client, plugin, task);
-	}
-
-	// --- Tooltip key + hover ----------------------------------------------------------
-
-	/**
-	 * While the task tooltip key is held over an NPC or object with tasks (the action the
-	 * game would show at the top left, like "Attack Cow"), list its tasks in a tooltip at
-	 * the cursor.
-	 */
-	private void showHoveredTasks()
-	{
-		TaskTooltipKey key = config.taskTooltipKey();
-		if (key == null || key == TaskTooltipKey.OFF || !client.isKeyPressed(key.keyCode) || client.isMenuOpen())
-		{
-			return;
-		}
-		MenuEntry[] entries = client.getMenu().getMenuEntries();
-		if (entries == null || entries.length == 0)
-		{
-			return;
-		}
-		MenuEntry top = entries[entries.length - 1];
-		List<NuzlockeTask> tasks;
-		if (top.getNpc() != null)
-		{
-			tasks = tasksForNpc(top.getNpc());
-		}
-		else if (isObjectAction(top.getType()) || top.getType() == MenuAction.EXAMINE_OBJECT)
-		{
-			tasks = tasksForObject(top.getIdentifier());
-		}
-		else
-		{
-			return;
-		}
-		if (tasks == null || tasks.isEmpty())
-		{
-			return;
-		}
-
-		StringBuilder text = new StringBuilder("<col=ff9040>Tasks</col>");
-		int shown = 0;
-		for (NuzlockeTask task : tasks)
-		{
-			if (shown == HOVER_MAX_TASKS)
-			{
-				text.append("</br><col=9f9f9f>and ").append(tasks.size() - shown).append(" more</col>");
-				break;
-			}
-			text.append("</br>");
-			if (canDo(task))
-			{
-				text.append(task.getName());
-			}
-			else
-			{
-				text.append("<col=ff5050>").append(task.getName()).append(' ').append(levelNote(task)).append("</col>");
-			}
-			if (task.getTargetQuantity() > 1)
-			{
-				text.append(" <col=ffff00>").append(Math.min(task.getCurrentProgress(), task.getTargetQuantity()))
-					.append('/').append(task.getTargetQuantity()).append("</col>");
-			}
-			shown++;
-		}
-		tooltipManager.add(new Tooltip(text.toString()));
 	}
 }

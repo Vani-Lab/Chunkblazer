@@ -136,6 +136,7 @@ public class ChunkBlazerOrbWidget
 			pointsOrb = parentOrbsWidget.createChild(-1, WidgetType.LAYER);
 			pointsText = createOrbWidget(pointsOrb, pointsOrbSpriteID, pointsOrbX, pointsOrbY, flip);
 			makeTaskButton(pointsOrb, "Tasks", taskBrowser::toggle);
+			makeTaskButton(bossTokenOrb, "Saved tasks", taskBrowser::toggleSavedPane);
 			wikiWidget = client.getWidget(InterfaceID.Orbs.WIKI);
 			if (wikiWidget != null)
 			{
@@ -150,27 +151,6 @@ public class ChunkBlazerOrbWidget
 				}
 			}
 		}
-	}
-
-	/**
-	 * Canvas position of the centre of the Points (Tasks) orb's round icon, where
-	 * revealed task cards fly to; null if the orbs aren't showing. Client thread.
-	 */
-	java.awt.Point getTasksOrbCentre()
-	{
-		if (pointsOrb == null || pointsOrb.isHidden())
-		{
-			return null;
-		}
-		Widget[] parts = pointsOrb.getDynamicChildren();
-		// Children: [0] frame, [1] number, [2] round icon (see createOrbWidget).
-		Widget target = parts != null && parts.length > 2 ? parts[2] : pointsOrb;
-		java.awt.Rectangle b = target.getBounds();
-		if (b == null || b.width <= 0 || b.height <= 0)
-		{
-			return null;
-		}
-		return new java.awt.Point((int) b.getCenterX(), (int) b.getCenterY());
 	}
 
 	/** Makes an orb clickable, like the Leagues orb: Points opens the task window, Boss Tokens the saved list. */
@@ -254,13 +234,6 @@ public class ChunkBlazerOrbWidget
 		widget.revalidate();
 
 		return text;
-	}
-
-	/** The Boss Token orb's bounds on screen, or null when it isn't showing. */
-	java.awt.Rectangle bossOrbBounds()
-	{
-		Widget orb = bossTokenOrb;
-		return orb == null || orb.isHidden() ? null : orb.getBounds();
 	}
 
 	private void removeWidget(Widget widget)

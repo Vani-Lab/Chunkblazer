@@ -110,18 +110,15 @@ class QuestRequirements
 		final boolean open;
 		final int indent;
 		final int gap;
-		/** An OSRS Wiki page this line opens when clicked (an Obtain or Equip task's item), or null. */
-		final String wiki;
 
 		Line(String text, Color color)
 		{
-			this(text, color, -1, null, null, false, false, 0, 0, null);
+			this(text, color, -1, null, null, false, false, 0, 0);
 		}
 
 		private Line(String text, Color color, int region, String quest, String toggle, boolean header, boolean open,
-			int indent, int gap, String wiki)
+			int indent, int gap)
 		{
-			this.wiki = wiki;
 			this.text = text;
 			this.color = color;
 			this.region = region;
@@ -135,35 +132,29 @@ class QuestRequirements
 
 		static Line header(String text, Color color, String toggle, boolean open)
 		{
-			return new Line(text, color, -1, null, toggle, true, open, 0, SECTION_GAP, null);
+			return new Line(text, color, -1, null, toggle, true, open, 0, SECTION_GAP);
 		}
 
 		static Line item(String text, Color color, int region, String quest)
 		{
-			return new Line(text, color, region, quest, null, false, false, ITEM_INDENT, 0, null);
+			return new Line(text, color, region, quest, null, false, false, ITEM_INDENT, 0);
 		}
 
 		/** Plain text with space above it, like the cost line. */
 		static Line spaced(String text, Color color)
 		{
-			return new Line(text, color, -1, null, null, false, false, 0, SECTION_GAP, null);
+			return new Line(text, color, -1, null, null, false, false, 0, SECTION_GAP);
 		}
 
 		/** The same line with other text, for wrapping. Only the first part keeps the space above. */
 		Line withText(String newText, boolean first)
 		{
-			return new Line(newText, color, region, quest, toggle, header, open, indent, first ? gap : 0, wiki);
-		}
-
-		/** A link to an item's OSRS Wiki page. */
-		static Line wikiLink(String text, Color color, String url, int gap)
-		{
-			return new Line(text, color, -1, null, null, false, false, 0, gap, url);
+			return new Line(newText, color, region, quest, toggle, header, open, indent, first ? gap : 0);
 		}
 
 		boolean clickable()
 		{
-			return region > 0 || quest != null || toggle != null || wiki != null;
+			return region > 0 || quest != null || toggle != null;
 		}
 	}
 

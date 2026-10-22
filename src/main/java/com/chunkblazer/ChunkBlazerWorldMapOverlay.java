@@ -34,7 +34,6 @@ import java.awt.Graphics2D;
 import java.awt.BasicStroke;
 import java.awt.Rectangle;
 import java.awt.Stroke;
-import java.util.Collections;
 import java.util.Set;
 import java.util.function.Consumer;
 import javax.inject.Inject;
@@ -239,11 +238,8 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		int yRegionMax = ((worldMapPosition.getY() + heightInTiles / 2) & REGION_TRUNCATE) + REGION_SIZE;
 		int regionPixelSize = (int) Math.ceil(REGION_SIZE * pixelsPerTile);
 
-		// The tutorial shows the whole map locked, bar its practice chunks: Lumbridge and the
-		// free chunks only open up once you've picked a mode.
-		boolean preview = plugin.isTutorialPreview();
-		Set<String> unlockedRegions = preview ? Collections.emptySet() : plugin.unlockedRegionIdsView();
-		Set<Integer> neighborRegions = preview ? Collections.emptySet() : plugin.getNeighborRegionIds();
+		Set<String> unlockedRegions = plugin.unlockedRegionIdsView();
+		Set<Integer> neighborRegions = plugin.getNeighborRegionIds();
 		int currentRegionId = plugin.getCurrentRegionId();
 
 		// Get mouse position for hover detection
@@ -260,7 +256,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 				// Free dungeon / off-map regions (regionY outside the surface band)
 				// are always accessible, so draw them as unlocked, not locked.
 				boolean isUnlocked = unlockedRegions.contains(String.valueOf(regionId))
-					|| !preview && plugin.isFreeRegion(regionId) || plugin.isPracticeUnlocked(regionId);
+					|| plugin.isFreeRegion(regionId);
 				boolean isNeighbor = neighborRegions.contains(regionId);
 				boolean isCharter = plugin.isCharterRegion(regionId);
 				boolean isFreeUnlockable = plugin.isFreeUnlockableRegion(regionId);
@@ -280,15 +276,14 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 					if (regionRect.contains(mousePos.getX(), mousePos.getY()))
 					{
 						hoveredRegionId = regionId;
-						isHoveredUnlockable = !preview && (isNeighbor || isCharter || isFreeUnlockable) && !isUnlocked;
+						isHoveredUnlockable = (isNeighbor || isCharter || isFreeUnlockable) && !isUnlocked;
 					}
 				}
 
 				// Each chunk gets a tint for its type: none for owned, gold/teal/blue/
 				// purple for the ways it can be unlocked, dark for locked. The chunk
 				// under the mouse is tinted more lightly, so you can see what's in it.
-				Color fill = fillFor(preview ? (isUnlocked ? ChunkUnlockType.UNLOCKED : ChunkUnlockType.LOCKED)
-					: ChunkUnlockType.of(plugin, regionId, isUnlocked, isNeighbor));
+				Color fill = fillFor(ChunkUnlockType.of(plugin, regionId, isUnlocked, isNeighbor));
 				if (regionId == hoveredRegionId && fill.getAlpha() > HOVER_ALPHA)
 				{
 					fill = new Color(fill.getRed(), fill.getGreen(), fill.getBlue(), HOVER_ALPHA);
@@ -311,7 +306,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 				// Free dungeon / off-map regions (regionY outside the surface band)
 				// are always accessible, so draw them as unlocked, not locked.
 				boolean isUnlocked = unlockedRegions.contains(String.valueOf(regionId))
-					|| !preview && plugin.isFreeRegion(regionId) || plugin.isPracticeUnlocked(regionId);
+					|| plugin.isFreeRegion(regionId);
 				boolean isNeighbor = neighborRegions.contains(regionId);
 				boolean isCurrent = regionId == currentRegionId;
 
@@ -322,8 +317,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 				int yPos = (worldMapRect.height - (int) (yTileOffset * pixelsPerTile)) + (int) worldMapRect.getY();
 				yPos -= regionPixelSize;
 
-				ChunkUnlockType type = preview ? (isUnlocked ? ChunkUnlockType.UNLOCKED : ChunkUnlockType.LOCKED)
-					: ChunkUnlockType.of(plugin, regionId, isUnlocked, isNeighbor);
+				ChunkUnlockType type = ChunkUnlockType.of(plugin, regionId, isUnlocked, isNeighbor);
 
 				// Uniform outline round every chunk. With "Lines Between Unlocked Chunks"
 				// off, edges between two unlocked chunks are skipped, so your whole
@@ -413,7 +407,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 			tooltip = g -> drawHoverTooltip(g, mousePos, id);
 		}
 		// Hovering a chunk you own: the same key + click opens its tasks (TaskBrowserOverlay).
-		else if (!preview && hoveredRegionId > 0 && plugin.isRegionUnlocked(hoveredRegionId)
+		else if (hoveredRegionId > 0 && plugin.isRegionUnlocked(hoveredRegionId)
 			&& !plugin.isFreeRegion(hoveredRegionId)
 			&& !plugin.getRegionName(hoveredRegionId).startsWith("Unknown Region"))
 		{
@@ -478,12 +472,6 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		graphics.drawString(regionIdText, textX, textY);
 	}
 
-	/** The chunk's name for a tooltip, without its "(region id)" number. */
-	private String tooltipName(int regionId)
-	{
-		return plugin.getRegionName(regionId).replaceAll("\\s*\\(\\d+\\)$", "").trim();
-	}
-
 	private void drawHoverTooltip(Graphics2D graphics, Point mousePos, int regionId)
 	{
 		if (mousePos == null)
@@ -491,7 +479,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 			return;
 		}
 
-		String regionName = tooltipName(regionId);
+		String regionName = plugin.getRegionName(regionId);
 		int unlockCost = plugin.getRegionUnlockCost(regionId);
 		int playerPoints = plugin.getTotalPoints();
 		boolean isBoss = plugin.isBossRegion(regionId);
@@ -575,10 +563,6 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 	/** Unlocked, or an always-open area such as a dungeon (same test as the chunk fill). */
 	private boolean isOpen(Set<String> unlockedRegions, int regionId)
 	{
-		if (plugin.isTutorialPreview())
-		{
-			return plugin.isPracticeUnlocked(regionId);
-		}
 		return unlockedRegions.contains(String.valueOf(regionId)) || plugin.isFreeRegion(regionId);
 	}
 
@@ -589,7 +573,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		{
 			return;
 		}
-		String line1 = tooltipName(regionId);
+		String line1 = plugin.getRegionName(regionId);
 		String line2 = "Unlocked";
 		String line3 = "Hold " + config.worldMapTasksKey() + " + click to view tasks";
 

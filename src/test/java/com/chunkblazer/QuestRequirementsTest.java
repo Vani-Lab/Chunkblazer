@@ -130,16 +130,14 @@ class QuestRequirementsTest
 	{
 		NuzlockeTask task = quest("COOKS_ASSISTANT");
 		List<QuestRequirements.Line> lines = quests.lines(task, region -> "Lumbridge");
-		// Ready, the closed Chunks section, and the note that the chunks are an estimate.
-		assertEquals(3, lines.size());
+		assertEquals(2, lines.size());
 		assertEquals("Ready to start", lines.get(0).text);
 		assertTrue(lines.get(1).header);
 		assertFalse(lines.get(1).open);
-		assertTrue(lines.get(2).text.startsWith("Chunks are from Quest Helper"));
 
 		// Opening it lists the chunks.
 		quests.toggleSection(lines.get(1).toggle);
-		assertTrue(quests.lines(task, region -> "Lumbridge").size() > 3);
+		assertTrue(quests.lines(task, region -> "Lumbridge").size() > 2);
 	}
 
 	@Test
