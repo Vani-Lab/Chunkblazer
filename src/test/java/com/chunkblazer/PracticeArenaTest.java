@@ -57,21 +57,21 @@ class PracticeArenaTest
 	}
 
 	@Test
-	void lmsGameCounts()
+	void lmsGame()
 	{
 		when(client.getVarbitValue(VarbitID.BR_INGAME)).thenReturn(1);
 		assertTrue(plugin.inPracticeArena());
 	}
 
 	@Test
-	void tutorialInstanceCounts()
+	void tutorialInstance()
 	{
 		nearby(3106, 16590); // a man, and a medium-kit opponent
 		assertTrue(plugin.inPracticeArena());
 	}
 
 	@Test
-	void peteInFeroxDoesNot()
+	void peteInFerox()
 	{
 		nearby(16576);
 		assertFalse(plugin.inPracticeArena());

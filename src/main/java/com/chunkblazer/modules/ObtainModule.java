@@ -41,6 +41,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GameState;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Skill;
@@ -50,6 +52,7 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.StatChanged;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.util.Text;
@@ -453,10 +456,14 @@ public class ObtainModule extends AbstractTaskModule
 		InventoryID.TACKLE_BOX, InventoryID.FORESTRY_KIT, InventoryID.HUNTSMANS_KIT,
 		InventoryID.WORN, InventoryID.BANK, InventoryID.SEED_VAULT);
 
+	// Stores that keep a count instead of the items: bowstrings spun straight onto a spool.
+	private static final Map<Integer, Integer> STORED = Map.of(ItemID.BOW_STRING, VarbitID.BOWSTRING_SPOOL_CHARGES);
+
 	/** seenOnly skips bags whose contents haven't arrived this session (see seenBags). */
 	private int countAll(Set<Integer> containerIds, int itemId, boolean seenOnly)
 	{
-		int total = 0;
+		Integer stored = STORED.get(itemId);
+		int total = stored != null ? client.getVarbitValue(stored) : 0;
 		for (int id : containerIds)
 		{
 			if (!seenOnly || id == InventoryID.INV || seenBags.contains(id))
@@ -892,17 +899,32 @@ public class ObtainModule extends AbstractTaskModule
 				rollSnapshots();
 				return;
 			}
+			creditSkilledThisTick();
+		}
+	}
+
+	/** A spool's count moved: the same as a bag changing, for obtain and skilling tasks. */
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		if (!activeTasks.isEmpty() && STORED.containsValue(event.getVarbitId()))
+		{
 			for (NuzlockeTask task : new HashSet<>(activeTasks))
 			{
-				Skill taskSkill = skillForCompletionType(task.getCompletionType());
-				if (taskSkill == null)
-				{
-					continue;
-				}
-				if (skillsXpGainedThisTick.contains(taskSkill))
-				{
-					creditSkillingDelta(task, taskSkill);
-				}
+				checkTaskProgress(task);
+			}
+			creditSkilledThisTick();
+		}
+	}
+
+	private void creditSkilledThisTick()
+	{
+		for (NuzlockeTask task : new HashSet<>(activeTasks))
+		{
+			Skill taskSkill = skillForCompletionType(task.getCompletionType());
+			if (taskSkill != null && skillsXpGainedThisTick.contains(taskSkill))
+			{
+				creditSkillingDelta(task, taskSkill);
 			}
 		}
 	}

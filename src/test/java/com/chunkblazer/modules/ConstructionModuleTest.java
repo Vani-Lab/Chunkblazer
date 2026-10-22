@@ -425,7 +425,7 @@ class ConstructionModuleTest extends AbstractTaskModuleTest
 	 * house), and the site never spawns anything; it only shows its wood once built.
 	 */
 	@Test
-	void valeTotemBuildCreditsByTheSitesNewLook()
+	void valeTotemBuild()
 	{
 		NuzlockeTask oak = createTaskWithRequiredObject("Build an Oak Totem", "build_oak_totem", "CONSTRUCTION", 1,
 			Arrays.asList(57065, 57066, 57067, 57068, 57069));

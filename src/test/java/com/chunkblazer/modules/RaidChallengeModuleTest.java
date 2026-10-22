@@ -159,7 +159,7 @@ class RaidChallengeModuleTest extends AbstractTaskModuleTest
 
 	/** dotzo: "Ranged only" ignored the first form, since only the flying form opened the fight. */
 	@Test
-	void styleRuleCoversTheFirstForm()
+	void styleRuleFirstForm()
 	{
 		NuzlockeTask ranged = addTask("kq_insect_repellent", c -> {
 			c.setDefeatNpcIds(Arrays.asList(965));

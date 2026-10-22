@@ -1,12 +1,14 @@
 package com.chunkblazer.modules;
 
 import net.runelite.api.MenuAction;
+import net.runelite.api.NPC;
 import net.runelite.api.ObjectComposition;
 import net.runelite.api.Skill;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.StatChanged;
@@ -178,6 +180,7 @@ class AgilityModuleTest extends AbstractTaskModuleTest
 		AnimationChanged ev = mock(AnimationChanged.class);
 		lenient().when(ev.getActor()).thenReturn(localPlayer);
 		agilityModule.onAnimationChanged(ev);
+		agilityModule.onGameTick(new GameTick());
 	}
 
 	/**
@@ -796,9 +799,34 @@ class AgilityModuleTest extends AbstractTaskModuleTest
 		assertEquals(1, task.getCurrentProgress());
 	}
 
+	/** Niddy: fighting a chicken on the way to the Varrock fence completed it before the jump. */
+	@Test
+	void flinchObstacle()
+	{
+		NuzlockeTask task = wyrmAdvancedTask();
+		lenient().when(client.getTickCount()).thenReturn(100);
+		agilityModule.onMenuOptionClicked(mockObjectClick(WYRM_ADVANCED_LADDER, MenuAction.GAME_OBJECT_FIRST_OPTION));
+
+		HitsplatApplied peck = mock(HitsplatApplied.class);
+		when(peck.getActor()).thenReturn(localPlayer);
+		agilityModule.onHitsplatApplied(peck);
+		simulatePlayerAnimation(424); // flinch from the hit
+		assertEquals(0, task.getCurrentProgress());
+
+		lenient().when(client.getTickCount()).thenReturn(101);
+		when(localPlayer.getInteracting()).thenReturn(mock(NPC.class));
+		simulatePlayerAnimation(422); // a last swing at the chicken
+		assertEquals(0, task.getCurrentProgress());
+
+		lenient().when(client.getTickCount()).thenReturn(103);
+		when(localPlayer.getInteracting()).thenReturn(null);
+		simulatePlayerAnimation(828); // the jump
+		assertEquals(1, task.getCurrentProgress());
+	}
+
 	/** Walking (no run energy) to a shortcut clicked from far away outlasts the wait. */
 	@Test
-	void longWalkToTheShortcutStillCounts()
+	void longWalkShortcut()
 	{
 		NuzlockeTask task = createTaskWithRequiredObject("Use a shortcut twice", "shortcut_twice", "AGILITY", 2,
 			Collections.singletonList(WYRM_ADVANCED_LADDER));
@@ -832,7 +860,7 @@ class AgilityModuleTest extends AbstractTaskModuleTest
 	 * click reports 57715 while the task lists the repaired look, 57713.
 	 */
 	@Test
-	void mausoleumBridgeCreditsByItsRepairedLook()
+	void mausoleumBridge()
 	{
 		NuzlockeTask task = createTaskWithRequiredObject("Mausoleum Bridge", "agility_level_69_mausoleum_bridge_jump",
 			"AGILITY", 1, Collections.singletonList(57713));

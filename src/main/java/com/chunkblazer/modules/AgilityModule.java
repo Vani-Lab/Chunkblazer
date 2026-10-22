@@ -38,12 +38,14 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.MenuAction;
+import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.StatChanged;
 import net.runelite.client.eventbus.Subscribe;
@@ -112,6 +114,8 @@ public class AgilityModule extends AbstractTaskModule
 	private int pendingObjectId = -1;
 	private int pendingTick = -1;
 	private WorldPoint lastPosition;
+	private boolean animatedThisTick;
+	private int hitTick = -1;
 
 	// Obstacle id -> tick it was last credited (see REUSE_COOLDOWN_TICKS).
 	private final Map<Integer, Integer> lastCreditTick = new ConcurrentHashMap<>();
@@ -222,6 +226,12 @@ public class AgilityModule extends AbstractTaskModule
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		if (animatedThisTick && hitTick != client.getTickCount())
+		{
+			confirmPendingTraversal("animation");
+		}
+		animatedThisTick = false;
+
 		// Still walking to the clicked obstacle: the wait starts once they get there, so a
 		// shortcut clicked from across the screen with no run energy still counts.
 		Player me = client.getLocalPlayer();
@@ -285,7 +295,7 @@ public class AgilityModule extends AbstractTaskModule
 	 * The player started an animation — proof they're actually performing the
 	 * obstacle they just clicked. Works for obstacles that award NO Agility XP
 	 * (stepping stones, pipes), which an XP gate can't catch. Confirms the pending
-	 * traversal; a misclick the player walks away from, or one they lack the level
+	 * traversal at the end of the tick; a misclick the player walks away from, or one they lack the level
 	 * for, never animates, so it never credits.
 	 */
 	@Subscribe
@@ -304,7 +314,19 @@ public class AgilityModule extends AbstractTaskModule
 		{
 			return; // animation reset to idle, not the start of an obstacle anim
 		}
-		confirmPendingTraversal("animation " + local.getAnimation());
+		// A swing at something we're fighting isn't the obstacle. Judged at the end of the
+		// tick, once any hit on us is known: the flinch from a chicken's peck isn't a fence
+		// jump either (Niddy).
+		animatedThisTick |= !(local.getInteracting() instanceof NPC);
+	}
+
+	@Subscribe
+	public void onHitsplatApplied(HitsplatApplied event)
+	{
+		if (event.getActor() == client.getLocalPlayer())
+		{
+			hitTick = client.getTickCount();
+		}
 	}
 
 	/**

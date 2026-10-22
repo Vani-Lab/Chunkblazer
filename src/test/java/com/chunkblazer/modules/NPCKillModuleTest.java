@@ -5,6 +5,7 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
@@ -15,6 +16,8 @@ import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.Hitsplat;
 import net.runelite.client.chat.ChatMessageManager;
+import net.runelite.client.events.ServerNpcLoot;
+import net.runelite.client.game.ItemStack;
 import com.chunkblazer.NuzlockeTask;
 import com.chunkblazer.TaskConstraints;
 import com.chunkblazer.api.ChunkBlazerApiClient;
@@ -1399,7 +1402,7 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 
 	/** Beefaros: the timed Mountain Troll task took every mountain troll kill from "Troll on Task". */
 	@Test
-	void differentConditionsDontStarveEachOther()
+	void conditionsDontStarve()
 	{
 		NuzlockeTask onTask = wolfTask("Defeat a Troll on Task", "defeat_troll_on_task", "SLAYER", null, 936, 937, 938, 4135, 4136);
 		NuzlockeTask timed = wolfTask("Defeat a Mountain Troll in 15 Seconds", "defeat_mountain_troll_fast", "NPC_Kill", 25, 936, 937);
@@ -1537,5 +1540,64 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 		npcKillModule.onGameTick(new GameTick());
 
 		assertEquals(1, moss.getCurrentProgress());
+	}
+
+	// --- Drop tasks: only the server's loot for the kill counts -----------------
+
+	private static final int MOSS_GIANT = 2090;
+	private static final int RANARR_SEED = 5295;
+
+	private NuzlockeTask ranarrFromMossGiant()
+	{
+		NuzlockeTask task = createTaskWithNpc("Defeat a Moss Giant for some Ranarr Seeds", "moss_giant_ranarr", "NPC_KILL", 1,
+			Arrays.asList(MOSS_GIANT));
+		TaskConstraints c = new TaskConstraints();
+		c.setDroppedItem("Ranarr Seed");
+		c.setDroppedItemIds(Arrays.asList(RANARR_SEED));
+		task.setConstraints(c);
+		npcKillModule.addActiveTask(task);
+		return task;
+	}
+
+	private void serverLoot(String npc, int itemId)
+	{
+		NPCComposition comp = mock(NPCComposition.class);
+		when(comp.getName()).thenReturn(npc);
+		npcKillModule.onServerNpcLoot(new ServerNpcLoot(comp, Arrays.asList(new ItemStack(itemId, 1))));
+	}
+
+	/**
+	 * dotzo: a ranarr seed the player dropped under the dying moss giant completed the task.
+	 * Ground items aren't read any more; the loot the server reports for the kill is.
+	 */
+	@Test
+	void killLootOnly() throws Exception
+	{
+		NuzlockeTask task = ranarrFromMossGiant();
+		simulateKill(mockNpc(MOSS_GIANT, 1, "Moss giant"));
+
+		advance(4);
+		serverLoot("Moss giant", 532); // big bones, no seed
+		serverLoot("Hill Giant", RANARR_SEED); // someone else's kind of loot
+		assertEquals(0, task.getCurrentProgress());
+
+		serverLoot("Moss giant", RANARR_SEED);
+		assertEquals(1, task.getCurrentProgress());
+	}
+
+	/** Loot that lands before the kill is decided (same tick) still counts. */
+	@Test
+	void lootBeforeKill() throws Exception
+	{
+		NuzlockeTask task = ranarrFromMossGiant();
+		NPC giant = mockNpc(MOSS_GIANT, 1, "Moss giant");
+		fireMyHitsplat(giant, 10);
+		ActorDeath death = mock(ActorDeath.class);
+		when(death.getActor()).thenReturn(giant);
+		npcKillModule.onActorDeath(death);
+		serverLoot("Moss giant", RANARR_SEED);
+		npcKillModule.onGameTick(new GameTick());
+
+		assertEquals(1, task.getCurrentProgress());
 	}
 }

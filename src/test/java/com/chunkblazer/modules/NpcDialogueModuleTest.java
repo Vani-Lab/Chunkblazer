@@ -261,7 +261,7 @@ class NpcDialogueModuleTest extends AbstractTaskModuleTest
 
 	/** cinnammonfox: Helvia's base NPC id isn't 13319; 13319 is the form she shows. */
 	@Test
-	void npcShownAsTheTaskFormCredits()
+	void transformedNpcTalk()
 	{
 		NuzlockeTask task = createTaskWithNpc("Talk to Helvia", "talk_to_helvia", "NPC_DIALOGUE", 1, Arrays.asList(13319));
 		task.getTargetNpc().setName("Helvia");
