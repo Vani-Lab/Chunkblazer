@@ -1393,7 +1393,7 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 		NuzlockeTask onTask = wolfTask("Defeat a White Wolf on Task", "defeat_white_wolf_on_task", "SLAYER", null, 107, 108);
 		NuzlockeTask timed = wolfTask("Defeat a White Wolf in 12 Seconds", "defeat_white_wolf_fast", "NPC_Kill", 20, 107, 108);
 
-		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(plain, onTask, timed));
+		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(plain, onTask, timed), "White wolf");
 
 		assertTrue(credited.contains(plain), "the plain task still gets the kill");
 		assertTrue(credited.contains(onTask));
@@ -1407,7 +1407,7 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 		NuzlockeTask onTask = wolfTask("Defeat a Troll on Task", "defeat_troll_on_task", "SLAYER", null, 936, 937, 938, 4135, 4136);
 		NuzlockeTask timed = wolfTask("Defeat a Mountain Troll in 15 Seconds", "defeat_mountain_troll_fast", "NPC_Kill", 25, 936, 937);
 
-		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(onTask, timed));
+		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(onTask, timed), "Mountain troll");
 
 		assertTrue(credited.contains(onTask), "the on-task troll task still gets the kill");
 		assertTrue(credited.contains(timed));
@@ -1419,10 +1419,27 @@ class NPCKillModuleTest extends AbstractTaskModuleTest
 	{
 		NuzlockeTask ogre = wolfTask("Defeat an Ogre", "defeat_ogre", "NPC_Kill", null, 136, 1153, 7989, 7990);
 		NuzlockeTask ogress = wolfTask("Defeat an Ogress", "defeat_ogress", "NPC_Kill", null, 7989, 7990);
+		ogre.getTargetNpc().setName("Ogre");
+		ogress.getTargetNpc().setName("Ogress");
 
-		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(ogre, ogress));
+		java.util.List<NuzlockeTask> credited = npcKillModule.mostSpecificMatches(Arrays.asList(ogre, ogress), "Ogress Warrior");
 
 		assertEquals(Arrays.asList(ogress), credited);
+	}
+
+	/**
+	 * Sebarak: a level 63 ogre only counted for "Defeat a Level 63 Ogre", never "Defeat an
+	 * Ogre", and the 12 second task took every kill from the 24 second one. It's an Ogre.
+	 */
+	@Test
+	void sameNameCountsBoth()
+	{
+		NuzlockeTask ogre = wolfTask("Defeat an Ogre in 24 Seconds", "defeat_ogre_fast", "NPC_Kill", 40, 136, 1153, 2095);
+		NuzlockeTask level63 = wolfTask("Defeat a Level 63 Ogre in 12 Seconds", "defeat_level_63_ogre_fast", "NPC_Kill", 20, 1153);
+		ogre.getTargetNpc().setName("Ogre");
+		level63.getTargetNpc().setName("Level 63 Ogre");
+
+		assertEquals(Arrays.asList(ogre, level63), npcKillModule.mostSpecificMatches(Arrays.asList(ogre, level63), "Ogre"));
 	}
 
 	// --- Hidden health bar (BlazeIWill's hill giant, Pyro's flinching) -------------

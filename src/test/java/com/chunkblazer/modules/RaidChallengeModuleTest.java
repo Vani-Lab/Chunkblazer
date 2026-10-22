@@ -719,6 +719,78 @@ class RaidChallengeModuleTest extends AbstractTaskModuleTest
 		assertFalse(t.isCompleted(), "MELEE rejects a RANGED hit on the target");
 	}
 
+	/** dotzo: a Moon of Peril flies off instead of dying; its "dead" varbit is the kill. */
+	@Test
+	void moonVarbit()
+	{
+		assertEquals(Integer.valueOf(9859), new com.google.gson.Gson().fromJson(
+			"{\"taskID\":\"x\",\"challenge\":{\"defeat_varbit\":9859}}", NuzlockeTask.class).getChallenge().getDefeatVarbit());
+		NuzlockeTask t = addTask("moons_of_peril_icebreaker", c -> {
+			c.setDefeatNpcIds(Arrays.asList(TEKTON));
+			c.setDefeatVarbit(9859);
+		});
+		fireHit(TEKTON);
+		net.runelite.api.events.VarbitChanged other = new net.runelite.api.events.VarbitChanged();
+		other.setVarbitId(9858);
+		other.setValue(1);
+		module.onVarbitChanged(other); // a different moon
+		assertFalse(t.isCompleted());
+
+		net.runelite.api.events.VarbitChanged dead = new net.runelite.api.events.VarbitChanged();
+		dead.setVarbitId(9859);
+		dead.setValue(1);
+		module.onVarbitChanged(dead);
+		assertTrue(t.isCompleted());
+	}
+
+	/** Blade Laser: Rex killed with Earth Bolt from a staff completed "Choking the King". */
+	@Test
+	void staffSpell()
+	{
+		NuzlockeTask t = addTask("dk_choking_the_king", c -> {
+			c.setDefeatNpcIds(Arrays.asList(TEKTON));
+			c.setStyleTargetIds(Arrays.asList(TEKTON));
+			c.setRequiredAttackStyle("MELEE");
+		});
+		setCombatStyle(18, 4); // staff, autocasting
+		fireHit(TEKTON);
+		fireDeath(TEKTON);
+		assertFalse(t.isCompleted());
+	}
+
+	/** A spell cast by hand reads as the weapon's melee stance; the cast says magic. */
+	@Test
+	void manualCast()
+	{
+		NuzlockeTask t = addTask("dk_choking_the_king", c -> {
+			c.setDefeatNpcIds(Arrays.asList(TEKTON));
+			c.setStyleTargetIds(Arrays.asList(TEKTON));
+			c.setRequiredAttackStyle("MELEE");
+		});
+		setCombatStyle(17, 0); // stab sword, in a melee stance
+		net.runelite.api.events.MenuOptionClicked cast = mock(net.runelite.api.events.MenuOptionClicked.class);
+		when(cast.getMenuAction()).thenReturn(net.runelite.api.MenuAction.WIDGET_TARGET_ON_NPC);
+		when(cast.getMenuOption()).thenReturn("Cast");
+		module.onMenuOptionClicked(cast);
+		fireHit(TEKTON);
+		fireDeath(TEKTON);
+		assertFalse(t.isCompleted());
+	}
+
+	/** A blowpipe (thrown, category 19) is ranged; it used to read as a whip's slash. */
+	@Test
+	void blowpipeRanged()
+	{
+		NuzlockeTask t = addTask("kq_ranged_only", c -> {
+			c.setDefeatNpcIds(Arrays.asList(TEKTON));
+			c.setStyleTargetIds(Arrays.asList(TEKTON));
+			c.setRequiredAttackStyle("RANGED");
+		});
+		setCombatStyle(19, 1);
+		encounterKill(TEKTON);
+		assertTrue(t.isCompleted());
+	}
+
 	// ── gear value (Please Carry Me / Pulling the Bootstraps) ────────────────
 
 	@Test

@@ -232,9 +232,16 @@ public class AgilityModule extends AbstractTaskModule
 		}
 		animatedThisTick = false;
 
+		// A log balance plays no animation, only a balancing walk, and some give no XP
+		// either (Tlati Rainforest). That walk is the proof.
+		Player me = client.getLocalPlayer();
+		if (pendingObjectId > 0 && me != null && balancing(me))
+		{
+			confirmPendingTraversal("pose");
+		}
+
 		// Still walking to the clicked obstacle: the wait starts once they get there, so a
 		// shortcut clicked from across the screen with no run energy still counts.
-		Player me = client.getLocalPlayer();
 		WorldPoint at = me != null ? me.getWorldLocation() : null;
 		if (pendingObjectId > 0 && at != null && !at.equals(lastPosition))
 		{
@@ -318,6 +325,15 @@ public class AgilityModule extends AbstractTaskModule
 		// tick, once any hit on us is known: the flinch from a chicken's peck isn't a fence
 		// jump either (Niddy).
 		animatedThisTick |= !(local.getInteracting() instanceof NPC);
+	}
+
+	/** Moving in a pose that isn't one of the player's own: balancing on a log or a rope. */
+	private static boolean balancing(Player p)
+	{
+		int pose = p.getPoseAnimation();
+		return pose != -1 && pose != p.getIdlePoseAnimation() && pose != p.getWalkAnimation()
+			&& pose != p.getRunAnimation() && pose != p.getWalkRotate180() && pose != p.getWalkRotateLeft()
+			&& pose != p.getWalkRotateRight() && pose != p.getIdleRotateLeft() && pose != p.getIdleRotateRight();
 	}
 
 	@Subscribe

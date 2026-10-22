@@ -824,6 +824,27 @@ class AgilityModuleTest extends AbstractTaskModuleTest
 		assertEquals(1, task.getCurrentProgress());
 	}
 
+	/** Venomphile: a log balance shows only a balancing walk, and some give no XP at all. */
+	@Test
+	void logBalancePose()
+	{
+		NuzlockeTask task = createTaskWithRequiredObject("Use the Coal Truck Log Balance", "log_balance", "AGILITY", 1,
+			Collections.singletonList(23274));
+		task.setHasRequiredObject(true);
+		agilityModule.addActiveTask(task);
+		when(localPlayer.getIdlePoseAnimation()).thenReturn(808);
+		when(localPlayer.getPoseAnimation()).thenReturn(808);
+		lenient().when(client.getTickCount()).thenReturn(100);
+		agilityModule.onMenuOptionClicked(mockObjectClick(23274, MenuAction.GAME_OBJECT_FIRST_OPTION));
+		agilityModule.onGameTick(new GameTick());
+		assertEquals(0, task.getCurrentProgress());
+
+		when(localPlayer.getPoseAnimation()).thenReturn(762); // balancing across
+		lenient().when(client.getTickCount()).thenReturn(103);
+		agilityModule.onGameTick(new GameTick());
+		assertEquals(1, task.getCurrentProgress());
+	}
+
 	/** Walking (no run energy) to a shortcut clicked from far away outlasts the wait. */
 	@Test
 	void longWalkShortcut()

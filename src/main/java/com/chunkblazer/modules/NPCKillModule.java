@@ -1142,7 +1142,7 @@ public class NPCKillModule extends AbstractTaskModule
 		// held death's NPC handle may already be a despawned husk reporting id=-1.
 
 		// Check all active tasks for a match
-		List<NuzlockeTask> matchingTasks = mostSpecificMatches(findMatchingTasks(death));
+		List<NuzlockeTask> matchingTasks = mostSpecificMatches(findMatchingTasks(death), death.npcName);
 
 		if (matchingTasks.isEmpty())
 		{
@@ -1387,8 +1387,12 @@ public class NPCKillModule extends AbstractTaskModule
 	 * Conditional tasks are narrowed per KIND of condition too: the timed "Defeat a
 	 * Mountain Troll fast" (8 ids) took every mountain troll kill from "Defeat a Troll
 	 * on Task" (58 ids), so the on-task task never saw one.
+	 *
+	 * A broader task named for the monster killed still counts: a level 63 Ogre is an
+	 * Ogre, so it credits "Defeat an Ogre" as well as "Defeat a Level 63 Ogre" (Sebarak).
+	 * An Ogress isn't called Ogre, so it still only counts for the Ogress task.
 	 */
-	List<NuzlockeTask> mostSpecificMatches(List<NuzlockeTask> matches)
+	List<NuzlockeTask> mostSpecificMatches(List<NuzlockeTask> matches, String npcName)
 	{
 		if (matches.size() <= 1)
 		{
@@ -1402,7 +1406,7 @@ public class NPCKillModule extends AbstractTaskModule
 		List<NuzlockeTask> out = new ArrayList<>();
 		for (List<NuzlockeTask> kind : byKind.values())
 		{
-			out.addAll(narrowest(kind));
+			out.addAll(narrowest(kind, npcName));
 		}
 		return out;
 	}
@@ -1415,8 +1419,8 @@ public class NPCKillModule extends AbstractTaskModule
 			+ (has && c.hasDroppedItemConstraint()) + (has && c.hasVarbitConstraints());
 	}
 
-	/** The tasks among {@code matches} with the smallest target-NPC id set. */
-	private List<NuzlockeTask> narrowest(List<NuzlockeTask> matches)
+	/** The tasks with the smallest target-NPC id set, plus any named for the monster killed. */
+	private List<NuzlockeTask> narrowest(List<NuzlockeTask> matches, String npcName)
 	{
 		if (matches.size() <= 1)
 		{
@@ -1436,7 +1440,9 @@ public class NPCKillModule extends AbstractTaskModule
 		List<NuzlockeTask> specific = new ArrayList<>();
 		for (NuzlockeTask task : matches)
 		{
-			if (npcIdSetSize(task) == minSize)
+			TargetNpc target = task.getTargetNpc();
+			if (npcIdSetSize(task) == minSize || target != null && target.getName() != null
+				&& target.getName().equalsIgnoreCase(npcName))
 			{
 				specific.add(task);
 			}
