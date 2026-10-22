@@ -1689,16 +1689,18 @@ public class TaskBrowserOverlay extends Overlay
 	private List<NuzlockeTask> pool(boolean includeGlobal)
 	{
 		List<NuzlockeTask> pool = new ArrayList<>();
+		// The account's completed list, not just each card's flag: a completion that
+		// arrived another way (the login merge) left Cectli Snow's card showing as active.
+		Set<String> completed = plugin.getCompletedTaskIdSet();
 		for (NuzlockeTask task : plugin.getActiveTasks())
 		{
-			if (task != null && task.getTaskId() != null && !task.isCompleted())
+			if (task != null && task.getTaskId() != null && !task.isCompleted() && !completed.contains(task.getTaskId()))
 			{
 				pool.add(task);
 			}
 		}
 		if (includeGlobal)
 		{
-			Set<String> completed = plugin.getCompletedTaskIdSet();
 			for (NuzlockeTask task : plugin.getVisibleGlobalTasks())
 			{
 				if (task != null && task.getTaskId() != null && !completed.contains(task.getTaskId()))

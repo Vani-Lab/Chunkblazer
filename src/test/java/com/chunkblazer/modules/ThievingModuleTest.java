@@ -317,6 +317,24 @@ class ThievingModuleTest extends AbstractTaskModuleTest
 		verify(completionCallback).onProgressUpdated(eq(task), eq(1));
 	}
 
+	/** Sinespe: a distracted wealthy citizen is auto-pickpocketed long after the one click. */
+	@Test
+	void autoPickpocketChainKeepsCounting()
+	{
+		NuzlockeTask task = createTaskWithNpc("Pickpocket a Wealthy Citizen", "pickpocket_wealthy_citizen", "THIEVING", 30,
+			Collections.singletonList(VARROCK_GUARD));
+		when(client.getSkillExperience(Skill.THIEVING)).thenReturn(1000);
+		thievingModule.addActiveTask(task);
+		when(client.getTickCount()).thenReturn(100);
+		thievingModule.onMenuOptionClicked(npcClick(VARROCK_GUARD, "Pickpocket"));
+		for (int i = 1; i <= 8; i++)
+		{
+			when(client.getTickCount()).thenReturn(100 + i * 2);
+			thievingModule.onStatChanged(mockThievingXp(1000 + i * 100));
+		}
+		verify(completionCallback).onProgressUpdated(eq(task), eq(8));
+	}
+
 	/** Sydlo: Dig Site workmen are pickpocketed with "Steal-from", not "Pickpocket". */
 	@Test
 	void stealFromDigsiteWorkmanCredits()

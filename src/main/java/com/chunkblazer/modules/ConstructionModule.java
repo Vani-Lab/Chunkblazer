@@ -26,8 +26,6 @@
 
 package com.chunkblazer.modules;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -115,10 +113,6 @@ public class ConstructionModule extends AbstractTaskModule
 	// furniture that already existed, not player builds.
 	private static final int SCENE_LOAD_SUPPRESS_TICKS = 2;
 
-	// Authoring aid: how many recent spawns the debug ring remembers, and how
-	// far back the [CONSTRUCTION-DEBUG] id-capture dump looks on an XP gain.
-	private static final int DEBUG_RING_CAPACITY = 32;
-
 	// How long after a "Build" click on a watched object its Construction XP
 	// still confirms the build. Covers walking to the object plus the build
 	// animation. Generous because a click right after a teleport can be a long
@@ -163,14 +157,12 @@ public class ConstructionModule extends AbstractTaskModule
 
 	// Last observed Construction XP; -1 until the first sighting seeds it.
 	private int previousConstructionXp = -1;
+	// Vale Totems builds give Fletching XP (Construction only with a house).
+	private int previousFletchingXp = -1;
 
 	// Tick of the last LOADING transition, for scene-replay suppression.
 	private int lastSceneLoadTick = -1;
 
-	// Authoring aid: ring of the latest object spawns (any id) while
-	// construction tasks are active, dumped on an uncredited XP gain so wrong
-	// authored object_ids can be corrected from the log.
-	private final Deque<int[]> debugSpawnRing = new ArrayDeque<>();
 
 	@Inject
 	public ConstructionModule()
@@ -198,9 +190,9 @@ public class ConstructionModule extends AbstractTaskModule
 		recentWatchedSpawns.clear();
 		recentBuildClicks.clear();
 		recentSearchClicks.clear();
-		debugSpawnRing.clear();
 		lastXpGainTick = -1;
 		previousConstructionXp = -1;
+		previousFletchingXp = -1;
 		lastSceneLoadTick = -1;
 	}
 
@@ -243,6 +235,7 @@ public class ConstructionModule extends AbstractTaskModule
 					// Seed from current XP so the FIRST build after a (re)load
 					// produces a real delta instead of a baseline sighting.
 					previousConstructionXp = client.getSkillExperience(Skill.CONSTRUCTION);
+					previousFletchingXp = client.getSkillExperience(Skill.FLETCHING);
 				}
 			});
 		}
@@ -334,7 +327,7 @@ public class ConstructionModule extends AbstractTaskModule
 			recentSearchClicks.put(event.getId(), getGameTick());
 			return;
 		}
-		if (!objectAction || option == null || !option.equalsIgnoreCase("Build"))
+		if (!objectAction || option == null || !option.regionMatches(true, 0, "Build", 0, 5))
 		{
 			// Walking off or using another object abandons a pending build.
 			if (objectAction || event.getMenuAction() == MenuAction.WALK)
@@ -350,10 +343,8 @@ public class ConstructionModule extends AbstractTaskModule
 		// units) often have wiki ids that don't line up with what the client
 		// reports, and the click id is the ground truth to author against.
 
-		if (!watchedObjectIds.contains(objectId))
-		{
-			return;
-		}
+		// Not only watched ids: a totem site only shows which wood it is once built
+		// (creditMatchingTasks reads its shown form then).
 		recentBuildClicks.put(objectId, getGameTick());
 	}
 
@@ -364,17 +355,6 @@ public class ConstructionModule extends AbstractTaskModule
 			return;
 		}
 		int tick = getGameTick();
-
-		// Authoring ring: remember the latest spawns regardless of watch state
-		// so an uncredited XP gain can dump the real runtime ids.
-		synchronized (debugSpawnRing)
-		{
-			debugSpawnRing.addLast(new int[]{tick, obj.getId()});
-			while (debugSpawnRing.size() > DEBUG_RING_CAPACITY)
-			{
-				debugSpawnRing.removeFirst();
-			}
-		}
 
 		if (!watchedObjectIds.contains(obj.getId()))
 		{
@@ -424,14 +404,22 @@ public class ConstructionModule extends AbstractTaskModule
 	@Subscribe
 	public void onStatChanged(StatChanged event)
 	{
-		if (event.getSkill() != Skill.CONSTRUCTION)
+		boolean construction = event.getSkill() == Skill.CONSTRUCTION;
+		if (!construction && event.getSkill() != Skill.FLETCHING)
 		{
 			return;
 		}
 
 		int newXp = event.getXp();
-		int prevXp = previousConstructionXp;
-		previousConstructionXp = newXp;
+		int prevXp = construction ? previousConstructionXp : previousFletchingXp;
+		if (construction)
+		{
+			previousConstructionXp = newXp;
+		}
+		else
+		{
+			previousFletchingXp = newXp;
+		}
 
 		// First sighting (login/initial sync) records the baseline only, and
 		// level/boost recalcs without an XP gain don't count as building.
@@ -448,28 +436,7 @@ public class ConstructionModule extends AbstractTaskModule
 		}
 
 
-		boolean credited = creditMatchingTasks();
-		if (!credited)
-		{
-			// Authoring aid: the player gained Construction XP but no watched
-			// object spawned in the window. Dump the real runtime spawn ids so
-			// a wrong authored object_id can be corrected from this log line.
-			StringBuilder recent = new StringBuilder();
-			synchronized (debugSpawnRing)
-			{
-				for (int[] entry : debugSpawnRing)
-				{
-					if (lastXpGainTick - entry[0] <= MATCH_WINDOW_TICKS)
-					{
-						if (recent.length() > 0)
-						{
-							recent.append(", ");
-						}
-						recent.append(entry[1]).append("@t").append(entry[0]);
-					}
-				}
-			}
-		}
+		creditMatchingTasks();
 	}
 
 	/**
@@ -508,6 +475,17 @@ public class ConstructionModule extends AbstractTaskModule
 				if (clickMatch == null && recentBuildClicks.containsKey(objectId))
 				{
 					clickMatch = objectId;
+				}
+			}
+			if (clickMatch == null)
+			{
+				for (Integer clicked : recentBuildClicks.keySet())
+				{
+					if (taskObjects.contains(shownId(clicked)))
+					{
+						clickMatch = clicked;
+						break;
+					}
 				}
 			}
 			if (spawnMatch == null && clickMatch == null)

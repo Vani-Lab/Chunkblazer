@@ -312,6 +312,9 @@ public class ThievingModule extends AbstractTaskModule
 
 			if (recentNpc)
 			{
+				// A distracted wealthy citizen is pickpocketed over and over from one
+				// click, so each steal keeps the click alive for the next.
+				lastInteractionTick = currentTick;
 				for (NuzlockeTask task : new HashSet<>(activeTasks))
 				{
 					Set<Integer> taskNpcs = taskTargetNpcs.get(task.getTaskId());

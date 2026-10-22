@@ -1,9 +1,12 @@
 package com.chunkblazer.modules;
 
 import net.runelite.api.MenuAction;
+import net.runelite.api.ObjectComposition;
 import net.runelite.api.Skill;
 import net.runelite.api.ChatMessageType;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.StatChanged;
@@ -789,6 +792,67 @@ class AgilityModuleTest extends AbstractTaskModuleTest
 		NuzlockeTask task = wyrmAdvancedTask();
 		lenient().when(client.getTickCount()).thenReturn(100);
 		agilityModule.onMenuOptionClicked(mockObjectClick(WYRM_ADVANCED_LADDER, MenuAction.GAME_OBJECT_FIRST_OPTION));
+		simulatePlayerAnimation(828);
+		assertEquals(1, task.getCurrentProgress());
+	}
+
+	/** Walking (no run energy) to a shortcut clicked from far away outlasts the wait. */
+	@Test
+	void longWalkToTheShortcutStillCounts()
+	{
+		NuzlockeTask task = createTaskWithRequiredObject("Use a shortcut twice", "shortcut_twice", "AGILITY", 2,
+			Collections.singletonList(WYRM_ADVANCED_LADDER));
+		task.setHasRequiredObject(true);
+		agilityModule.addActiveTask(task);
+		lenient().when(client.getTickCount()).thenReturn(100);
+		agilityModule.onMenuOptionClicked(mockObjectClick(WYRM_ADVANCED_LADDER, MenuAction.GAME_OBJECT_FIRST_OPTION));
+		for (int t = 101; t <= 125; t++)
+		{
+			lenient().when(client.getTickCount()).thenReturn(t);
+			when(localPlayer.getWorldLocation()).thenReturn(new WorldPoint(1600 + t, 2900, 0));
+			agilityModule.onGameTick(new GameTick());
+		}
+		simulatePlayerAnimation(828);
+		assertEquals(1, task.getCurrentProgress());
+
+		// Standing still, the click still runs out.
+		lenient().when(client.getTickCount()).thenReturn(200);
+		agilityModule.onMenuOptionClicked(mockObjectClick(WYRM_ADVANCED_LADDER, MenuAction.GAME_OBJECT_FIRST_OPTION));
+		for (int t = 201; t <= 215; t++)
+		{
+			lenient().when(client.getTickCount()).thenReturn(t);
+			agilityModule.onGameTick(new GameTick());
+		}
+		simulatePlayerAnimation(828);
+		assertEquals(1, task.getCurrentProgress());
+	}
+
+	/**
+	 * dotzo: the repaired Mausoleum bridge never credited. It's a varbit multiloc, so the
+	 * click reports 57715 while the task lists the repaired look, 57713.
+	 */
+	@Test
+	void mausoleumBridgeCreditsByItsRepairedLook()
+	{
+		NuzlockeTask task = createTaskWithRequiredObject("Mausoleum Bridge", "agility_level_69_mausoleum_bridge_jump",
+			"AGILITY", 1, Collections.singletonList(57713));
+		task.setHasRequiredObject(true);
+		agilityModule.addActiveTask(task);
+		ObjectComposition site = mock(ObjectComposition.class);
+		ObjectComposition look = mock(ObjectComposition.class);
+		when(client.getObjectDefinition(57715)).thenReturn(site);
+		when(site.getImpostorIds()).thenReturn(new int[]{5160, 57711, 57713});
+		when(site.getImpostor()).thenReturn(look);
+
+		when(look.getId()).thenReturn(5160); // still broken
+		lenient().when(client.getTickCount()).thenReturn(100);
+		agilityModule.onMenuOptionClicked(mockObjectClick(57715, MenuAction.GAME_OBJECT_FIRST_OPTION));
+		simulatePlayerAnimation(828);
+		assertEquals(0, task.getCurrentProgress());
+
+		when(look.getId()).thenReturn(57713); // repaired
+		lenient().when(client.getTickCount()).thenReturn(200);
+		agilityModule.onMenuOptionClicked(mockObjectClick(57715, MenuAction.GAME_OBJECT_FIRST_OPTION));
 		simulatePlayerAnimation(828);
 		assertEquals(1, task.getCurrentProgress());
 	}
