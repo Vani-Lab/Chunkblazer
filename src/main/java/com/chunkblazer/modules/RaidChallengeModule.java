@@ -528,13 +528,16 @@ public class RaidChallengeModule extends AbstractTaskModule
 
 		// (b) First hit on a defeat_npc target opens its encounter BEFORE the style check
 		// below, so the opening hit is already subject to the weapon/style/no-run rules
-		// (HM06's "Tekton, crush only" must judge the very first hit).
+		// (HM06's "Tekton, crush only" must judge the very first hit). A style target opens
+		// it too, so the Kalphite Queen's first form counts toward "Ranged only".
 		for (NuzlockeTask task : new HashSet<>(activeTasks))
 		{
 			RaidChallenge ch = task.getChallenge();
 			State s = states.get(task.getTaskId());
+			List<Integer> style = styleTargetIds(ch);
 			if (ch == null || s == null || s.encounterActive || deadTargets.contains(hitNpc)
-				|| ch.getDefeatNpcIds() == null || !ch.getDefeatNpcIds().contains(npcId))
+				|| ch.getDefeatNpcIds() == null
+				|| !ch.getDefeatNpcIds().contains(npcId) && (style == null || !style.contains(npcId)))
 			{
 				continue;
 			}
@@ -925,6 +928,8 @@ public class RaidChallengeModule extends AbstractTaskModule
 	@Subscribe
 	public void onNpcChanged(NpcChanged e)
 	{
+		// A boss that "dies" into its next form (the Kalphite Queen) is alive again.
+		deadTargets.remove(e.getNpc());
 		if (isFinalWarden(e.getNpc().getId()))
 		{
 			finalWarden = e.getNpc();
