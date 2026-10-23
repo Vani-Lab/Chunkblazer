@@ -34,11 +34,12 @@ import java.awt.Graphics2D;
 import java.awt.BasicStroke;
 import java.awt.Rectangle;
 import java.awt.Stroke;
+import java.awt.image.BufferedImage;
+import java.util.Collections;
 import java.util.Set;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.api.Client;
@@ -52,10 +53,9 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-@Slf4j
 // Shared: the task window reads which chunk is hovered on the world map.
 @Singleton
-class ChunkBlazerWorldMapOverlay extends Overlay
+public class ChunkBlazerWorldMapOverlay extends Overlay
 {
 	private static final int REGION_SIZE = 64; // 64 tiles per region
 	private static final int REGION_TRUNCATE = ~((1 << 6) - 1);
@@ -96,7 +96,9 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		ChatboxPanelManager chatboxPanelManager, ClientThread clientThread)
 	{
 		setPosition(OverlayPosition.DYNAMIC);
-		setPriority(PRIORITY_HIGH);
+		// Just above RuneLite's own map icons (its WorldMapOverlay is PRIORITY_HIGHEST, and on the
+		// map a higher priority draws later), so locked chunks' tint covers the icons inside them.
+		setPriority(PRIORITY_HIGHEST + 0.01f);
 		setLayer(OverlayLayer.MANUAL);
 		drawAfterInterface(InterfaceID.WORLDMAP);
 		this.client = client;
@@ -110,7 +112,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 	 * @return the region id under the cursor on the world map, or -1 if none.
 	 * Read by {@code ChunkBlazerPlugin.unlockFromWorldMap} for keybind+click unlock.
 	 */
-	int getHoveredRegionId()
+	public int getHoveredRegionId()
 	{
 		return hoveredRegionId;
 	}
@@ -119,20 +121,14 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 	 * Point out a chunk on the world map: jumps there now if the map is open, or as soon
 	 * as it's opened, and outlines it for a few seconds.
 	 */
-	void focusRegion(int regionId)
+	public void focusRegion(int regionId)
 	{
 		focusRegion = regionId;
 		focusShownAt = 0;
 		focusPending = true;
 	}
 
-	/** True if the world map is open right now. */
-	boolean isMapOpen()
-	{
-		return client.getWidget(InterfaceID.Worldmap.MAP_CONTAINER) != null;
-	}
-
-	void drawTooltip(Graphics2D graphics)
+	public void drawTooltip(Graphics2D graphics)
 	{
 		Consumer<Graphics2D> shown = tooltip;
 		if (shown != null)
@@ -196,6 +192,20 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		graphics.setClip(oldClip);
 	}
 
+	/** An unlocked paid chunk (not free, charter or a dungeon) touches this one north, south, east or west. */
+	private boolean nextToPaidChunk(Set<String> unlocked, int regionId)
+	{
+		for (int next : new int[]{regionId + 1, regionId - 1, regionId + 256, regionId - 256})
+		{
+			if (unlocked.contains(String.valueOf(next)) && !plugin.isFreeUnlockableRegion(next)
+				&& !plugin.isCharterRegion(next) && !plugin.isFreeRegion(next))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private Dimension renderChunks(Graphics2D graphics)
 	{
 		// Chunk borders render on three independent surfaces: the minimap
@@ -222,209 +232,419 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		Rectangle worldMapRect = map.getBounds();
 		graphics.setClip(worldMapRect);
 
-		float pixelsPerTile = worldMap.getWorldMapZoom();
-		int widthInTiles = (int) Math.ceil(worldMapRect.getWidth() / pixelsPerTile);
-		int heightInTiles = (int) Math.ceil(worldMapRect.getHeight() / pixelsPerTile);
+		MapView view = new MapView(worldMapRect, worldMap.getWorldMapZoom(), worldMap.getWorldMapPosition());
 
-		Point worldMapPosition = worldMap.getWorldMapPosition();
-
-		// Calculate visible region bounds
-		int yTileMin = worldMapPosition.getY() - heightInTiles / 2;
-		int xRegionMin = (worldMapPosition.getX() - widthInTiles / 2) & REGION_TRUNCATE;
-		int xRegionMax = ((worldMapPosition.getX() + widthInTiles / 2) & REGION_TRUNCATE) + REGION_SIZE;
-		int yRegionMin = (yTileMin & REGION_TRUNCATE);
-		int yRegionMax = ((worldMapPosition.getY() + heightInTiles / 2) & REGION_TRUNCATE) + REGION_SIZE;
-		int regionPixelSize = (int) Math.ceil(REGION_SIZE * pixelsPerTile);
-
-		Set<String> unlockedRegions = plugin.unlockedRegionIdsView();
-		Set<Integer> neighborRegions = plugin.getNeighborRegionIds();
+		// The tutorial shows the whole map locked, bar its practice chunks: Lumbridge and the
+		// free chunks only open up once you've picked a mode.
+		boolean preview = plugin.isTutorialPreview();
+		Set<String> unlockedRegions = preview ? Collections.emptySet() : plugin.unlockedRegionIdsView();
+		Set<Integer> neighborRegions = preview ? Collections.emptySet() : plugin.getNeighborRegionIds();
 		int currentRegionId = plugin.getCurrentRegionId();
 
-		// Get mouse position for hover detection
+		// The chunk under the mouse (the last one whose square holds it, as drawn).
 		Point mousePos = client.getMouseCanvasPosition();
 		hoveredRegionId = -1;
 		isHoveredUnlockable = false;
-
-		// First pass: Draw locked chunk overlays (greyscale effect)
-		for (int x = xRegionMin; x < xRegionMax; x += REGION_SIZE)
+		if (mousePos != null && worldMapRect.contains(mousePos.getX(), mousePos.getY()))
 		{
-			for (int y = yRegionMin; y < yRegionMax; y += REGION_SIZE)
+			for (int x = view.xRegionMin; x < view.xRegionMax; x += REGION_SIZE)
 			{
-				int regionId = ((x >> 6) << 8) | (y >> 6);
-				// Free dungeon / off-map regions (regionY outside the surface band)
-				// are always accessible, so draw them as unlocked, not locked.
-				boolean isUnlocked = unlockedRegions.contains(String.valueOf(regionId))
-					|| plugin.isFreeRegion(regionId);
-				boolean isNeighbor = neighborRegions.contains(regionId);
-				boolean isCharter = plugin.isCharterRegion(regionId);
-				boolean isFreeUnlockable = plugin.isFreeUnlockableRegion(regionId);
-
-				int yTileOffset = -(yTileMin - y);
-				int xTileOffset = x + widthInTiles / 2 - worldMapPosition.getX();
-
-				int xPos = ((int) (xTileOffset * pixelsPerTile)) + (int) worldMapRect.getX();
-				int yPos = (worldMapRect.height - (int) (yTileOffset * pixelsPerTile)) + (int) worldMapRect.getY();
-				yPos -= regionPixelSize;
-
-				Rectangle regionRect = new Rectangle(xPos, yPos, regionPixelSize, regionPixelSize);
-
-				// Check if mouse is hovering over this region
-				if (mousePos != null && worldMapRect.contains(mousePos.getX(), mousePos.getY()))
+				for (int y = view.yRegionMin; y < view.yRegionMax; y += REGION_SIZE)
 				{
-					if (regionRect.contains(mousePos.getX(), mousePos.getY()))
+					int xPos = view.x(x);
+					int yPos = view.y(y);
+					if (mousePos.getX() >= xPos && mousePos.getX() < xPos + view.size
+						&& mousePos.getY() >= yPos && mousePos.getY() < yPos + view.size)
 					{
-						hoveredRegionId = regionId;
-						isHoveredUnlockable = (isNeighbor || isCharter || isFreeUnlockable) && !isUnlocked;
-					}
-				}
-
-				// Each chunk gets a tint for its type: none for owned, gold/teal/blue/
-				// purple for the ways it can be unlocked, dark for locked. The chunk
-				// under the mouse is tinted more lightly, so you can see what's in it.
-				Color fill = fillFor(ChunkUnlockType.of(plugin, regionId, isUnlocked, isNeighbor));
-				if (regionId == hoveredRegionId && fill.getAlpha() > HOVER_ALPHA)
-				{
-					fill = new Color(fill.getRed(), fill.getGreen(), fill.getBlue(), HOVER_ALPHA);
-				}
-				graphics.setColor(fill);
-				graphics.fillRect(xPos, yPos, regionPixelSize, regionPixelSize);
-			}
-		}
-
-		// Second pass: Draw borders and region IDs
-		Font regionFont = FontManager.getRunescapeBoldFont().deriveFont(14f);
-		graphics.setFont(regionFont);
-		Rectangle currentChunkRect = null;
-
-		for (int x = xRegionMin; x < xRegionMax; x += REGION_SIZE)
-		{
-			for (int y = yRegionMin; y < yRegionMax; y += REGION_SIZE)
-			{
-				int regionId = ((x >> 6) << 8) | (y >> 6);
-				// Free dungeon / off-map regions (regionY outside the surface band)
-				// are always accessible, so draw them as unlocked, not locked.
-				boolean isUnlocked = unlockedRegions.contains(String.valueOf(regionId))
-					|| plugin.isFreeRegion(regionId);
-				boolean isNeighbor = neighborRegions.contains(regionId);
-				boolean isCurrent = regionId == currentRegionId;
-
-				int yTileOffset = -(yTileMin - y);
-				int xTileOffset = x + widthInTiles / 2 - worldMapPosition.getX();
-
-				int xPos = ((int) (xTileOffset * pixelsPerTile)) + (int) worldMapRect.getX();
-				int yPos = (worldMapRect.height - (int) (yTileOffset * pixelsPerTile)) + (int) worldMapRect.getY();
-				yPos -= regionPixelSize;
-
-				ChunkUnlockType type = ChunkUnlockType.of(plugin, regionId, isUnlocked, isNeighbor);
-
-				// Uniform outline round every chunk. With "Lines Between Unlocked Chunks"
-				// off, edges between two unlocked chunks are skipped, so your whole
-				// unlocked area reads as one connected piece of map. North is +1 in
-				// region id, east is +256.
-				graphics.setColor(CHUNK_BORDER);
-				int right = xPos + regionPixelSize;
-				int bottom = yPos + regionPixelSize;
-				boolean gridLines = config.showChunkGridLines();
-				if (gridLines || !(isUnlocked && isOpen(unlockedRegions, regionId + 1)))
-				{
-					graphics.drawLine(xPos, yPos, right, yPos);
-				}
-				if (gridLines || !(isUnlocked && isOpen(unlockedRegions, regionId - 1)))
-				{
-					graphics.drawLine(xPos, bottom, right, bottom);
-				}
-				if (gridLines || !(isUnlocked && isOpen(unlockedRegions, regionId - 256)))
-				{
-					graphics.drawLine(xPos, yPos, xPos, bottom);
-				}
-				if (gridLines || !(isUnlocked && isOpen(unlockedRegions, regionId + 256)))
-				{
-					graphics.drawLine(right, yPos, right, bottom);
-				}
-
-				// The chunk you're standing in is outlined last, on top of everything.
-				if (isCurrent)
-				{
-					currentChunkRect = new Rectangle(xPos, yPos, regionPixelSize, regionPixelSize);
-				}
-
-				// Hover emphasis on unlockable chunks (outline only, no fill).
-				if (type.isUnlockable() && regionId == hoveredRegionId)
-				{
-					graphics.drawRect(xPos + 1, yPos + 1, regionPixelSize - 2, regionPixelSize - 2);
-				}
-
-				// What it costs, written in the middle of every unlockable chunk.
-				if (config.showChunkCostLabels() && type.isUnlockable() && regionPixelSize >= MIN_LABEL_CHUNK_PIXELS)
-				{
-					drawCostLabel(graphics, xPos, yPos, regionPixelSize,
-						ChunkUnlockType.costLabel(plugin, regionId, type), type.color);
-					graphics.setFont(regionFont);
-				}
-
-				// Region ID in the top-left corner, only on the chunk under the mouse, so the
-				// zoomed-out map isn't covered in numbers.
-				if (regionId == hoveredRegionId)
-				{
-					String idText = String.valueOf(regionId);
-					int textX = xPos + 4;
-					int textY = yPos + 16;
-
-					// Make sure text position is within the map bounds
-					if (textX > worldMapRect.getX() && textY > worldMapRect.getY())
-					{
-						// Simple drop shadow (single offset, bottom-right)
-						graphics.setColor(Color.BLACK);
-						graphics.drawString(idText, textX + 1, textY + 1);
-
-						// Same colour family as the chunk's tint, solid so it stays readable.
-						graphics.setColor(type.color);
-						graphics.drawString(idText, textX, textY);
+						hoveredRegionId = ((x >> 6) << 8) | (y >> 6);
 					}
 				}
 			}
 		}
-
-		// Current chunk: a double cyan outline, drawn after every other line so
-		// nothing covers it.
-		if (currentChunkRect != null)
+		if (hoveredRegionId > 0)
 		{
-			graphics.setColor(CURRENT_BORDER);
-			graphics.drawRect(currentChunkRect.x, currentChunkRect.y, currentChunkRect.width, currentChunkRect.height);
-			graphics.drawRect(currentChunkRect.x + 1, currentChunkRect.y + 1,
-				currentChunkRect.width - 2, currentChunkRect.height - 2);
+			int id = hoveredRegionId;
+			boolean unlocked = unlockedRegions.contains(String.valueOf(id))
+				|| !preview && plugin.isFreeRegion(id) || plugin.isPracticeUnlocked(id);
+			isHoveredUnlockable = !preview && !unlocked
+				&& (neighborRegions.contains(id) || plugin.isCharterRegion(id) || plugin.isFreeUnlockableRegion(id));
+		}
+
+		// Drawn once into an image and copied while nothing it shows has changed; drawn
+		// straight onto the screen while the map is being dragged or zoomed.
+		long now = System.currentTimeMillis();
+		Object key = java.util.Arrays.asList(worldMapRect, view.position.getX(), view.position.getY(), view.zoom,
+			hoveredRegionId, currentRegionId, preview, plugin.getLastUnlockChangeMs(), unlockedRegions.size(),
+			neighborRegions.hashCode(), config.showChunkGridLines(), config.showChunkCostLabels());
+		boolean changed = !key.equals(mapKey);
+		if (changed && now - mapChangedAt < MAP_LIVE_MS)
+		{
+			// Still moving: draw it live, and keep the picture for when it settles.
+			mapChangedAt = now;
+			mapKey = key;
+			mapImageGood = false;
+			drawChunks(graphics, view, preview, unlockedRegions, neighborRegions, currentRegionId);
+		}
+		else
+		{
+			if (changed)
+			{
+				mapChangedAt = now;
+				mapKey = key;
+			}
+			if (changed || !mapImageGood || now - mapDrawnAt >= MAP_REDRAW_MS || mapImage == null
+				|| mapImage.getWidth() != worldMapRect.width || mapImage.getHeight() != worldMapRect.height)
+			{
+				if (mapImage == null || mapImage.getWidth() != worldMapRect.width || mapImage.getHeight() != worldMapRect.height)
+				{
+					// Premultiplied: the cheapest kind to copy onto the screen every frame.
+					mapImage = new BufferedImage(Math.max(1, worldMapRect.width), Math.max(1, worldMapRect.height),
+						BufferedImage.TYPE_INT_ARGB_PRE);
+				}
+				Graphics2D g = mapImage.createGraphics();
+				g.setComposite(java.awt.AlphaComposite.Clear);
+				g.fillRect(0, 0, mapImage.getWidth(), mapImage.getHeight());
+				g.setComposite(java.awt.AlphaComposite.SrcOver);
+				g.setRenderingHints(graphics.getRenderingHints());
+				g.translate(-worldMapRect.x, -worldMapRect.y);
+				drawChunks(g, view, preview, unlockedRegions, neighborRegions, currentRegionId);
+				g.dispose();
+				mapDrawnAt = now;
+				mapImageGood = true;
+			}
+			graphics.drawImage(mapImage, worldMapRect.x, worldMapRect.y, null);
 		}
 
 		// Hovering an unlockable neighbour: show the keybind+click tooltip. The
 		// actual unlock is handled in ChunkBlazerPlugin.unlockFromWorldMap when
 		// the map-unlock key is held during the click (Region Locker model) —
-		// world-map right-click menu entries don't render reliably.
+		// world-map right-click menu entries don't render reliably. The tooltip follows the
+		// mouse as it is when drawn.
 		if (isHoveredUnlockable && hoveredRegionId > 0)
 		{
 			int id = hoveredRegionId;
-			tooltip = g -> drawHoverTooltip(g, mousePos, id);
+			tooltip = g -> drawHoverTooltip(g, client.getMouseCanvasPosition(), id);
 		}
-		// Hovering a chunk you own: the same key + click opens its tasks (TaskBrowserOverlay).
-		else if (hoveredRegionId > 0 && plugin.isRegionUnlocked(hoveredRegionId)
+		// Hovering a chunk you own: the same key + click opens its tasks (ChunkBlazer UI's TaskWindow).
+		else if (!preview && hoveredRegionId > 0 && plugin.isRegionUnlocked(hoveredRegionId)
 			&& !plugin.isFreeRegion(hoveredRegionId)
 			&& !plugin.getRegionName(hoveredRegionId).startsWith("Unknown Region"))
 		{
 			int id = hoveredRegionId;
-			tooltip = g -> drawUnlockedTooltip(g, mousePos, id);
+			tooltip = g -> drawUnlockedTooltip(g, client.getMouseCanvasPosition(), id);
 		}
-
-		// Draw region ID in top-left corner of world map
-		if (hoveredRegionId > 0)
-		{
-			drawRegionIdDisplay(graphics, worldMapRect, hoveredRegionId);
-		}
-		else
-		{
-			// Show current player region if not hovering
-			drawRegionIdDisplay(graphics, worldMapRect, currentRegionId);
-		}
-
 		return null;
+	}
+
+	// The chunk tints, borders and labels as last drawn (see renderChunks).
+	private static final long MAP_LIVE_MS = 150;
+	private static final long MAP_REDRAW_MS = 500;
+	private BufferedImage mapImage;
+	private Object mapKey;
+	private long mapChangedAt;
+	private long mapDrawnAt;
+	private boolean mapImageGood;
+
+	/** Where the map's chunks are on screen this frame. */
+	private static final class MapView
+	{
+		final Rectangle rect;
+		final float zoom;
+		final Point position;
+		final int widthInTiles;
+		final int yTileMin;
+		final int xRegionMin;
+		final int xRegionMax;
+		final int yRegionMin;
+		final int yRegionMax;
+		final int size;
+
+		MapView(Rectangle rect, float zoom, Point position)
+		{
+			this.rect = rect;
+			this.zoom = zoom;
+			this.position = position;
+			widthInTiles = (int) Math.ceil(rect.getWidth() / zoom);
+			int heightInTiles = (int) Math.ceil(rect.getHeight() / zoom);
+			yTileMin = position.getY() - heightInTiles / 2;
+			xRegionMin = (position.getX() - widthInTiles / 2) & REGION_TRUNCATE;
+			xRegionMax = ((position.getX() + widthInTiles / 2) & REGION_TRUNCATE) + REGION_SIZE;
+			yRegionMin = yTileMin & REGION_TRUNCATE;
+			yRegionMax = ((position.getY() + heightInTiles / 2) & REGION_TRUNCATE) + REGION_SIZE;
+			size = (int) Math.ceil(REGION_SIZE * zoom);
+		}
+
+		int x(int tileX)
+		{
+			int xTileOffset = tileX + widthInTiles / 2 - position.getX();
+			return ((int) (xTileOffset * zoom)) + (int) rect.getX();
+		}
+
+		int y(int tileY)
+		{
+			int yTileOffset = -(yTileMin - tileY);
+			return (rect.height - (int) (yTileOffset * zoom)) + (int) rect.getY() - size;
+		}
+	}
+
+	// What each chunk is (its type, tint and whether it's open), worked out once per change in
+	// what's unlocked rather than for every chunk on every frame. Indexed by region id.
+	private static final int REGIONS = 1 << 16;
+	private final byte[] chunkType = new byte[REGIONS];
+	private final byte[] chunkFill = new byte[REGIONS];
+	private final boolean[] chunkUnlocked = new boolean[REGIONS];
+	private final boolean[] chunkOpen = new boolean[REGIONS];
+	private Object chunksKey;
+	private static final ChunkUnlockType[] TYPES = ChunkUnlockType.values();
+	// One line per chunk edge (they used to be drawn twice, once by each side).
+	private static final Color GRID_LINE = new Color(255, 255, 255, 110);
+
+	/** Forgets every chunk's state when what's unlocked has changed. */
+	private void checkChunks(boolean preview, Set<String> unlockedRegions, Set<Integer> neighborRegions)
+	{
+		// Also every couple of seconds, for anything that changes without an unlock (the
+		// tutorial's practice chunks, costs).
+		Object key = java.util.Arrays.asList(preview, plugin.getLastUnlockChangeMs(), unlockedRegions.size(),
+			neighborRegions.hashCode(), System.currentTimeMillis() / 2000);
+		if (!key.equals(chunksKey))
+		{
+			chunksKey = key;
+			java.util.Arrays.fill(chunkType, (byte) 0);
+		}
+	}
+
+	/** A chunk's type (worked out the first time it's needed), or LOCKED off the map. */
+	private ChunkUnlockType chunk(int regionId, boolean preview, Set<String> unlockedRegions, Set<Integer> neighborRegions)
+	{
+		if (regionId < 0 || regionId >= REGIONS)
+		{
+			return ChunkUnlockType.LOCKED;
+		}
+		if (chunkType[regionId] == 0)
+		{
+			// Free dungeon / off-map regions (regionY outside the surface band) are always
+			// accessible, so they show as unlocked, not locked.
+			boolean unlocked = unlockedRegions.contains(String.valueOf(regionId))
+				|| !preview && plugin.isFreeRegion(regionId) || plugin.isPracticeUnlocked(regionId);
+			ChunkUnlockType type = preview ? (unlocked ? ChunkUnlockType.UNLOCKED : ChunkUnlockType.LOCKED)
+				: ChunkUnlockType.of(plugin, regionId, unlocked, neighborRegions.contains(regionId));
+			// A free chunk has no tint of its own: it's greyed like a locked one until a paid
+			// chunk next to it is unlocked (another free chunk doesn't count), then clear like an
+			// unlocked one. Either way it says FREE until you walk in.
+			ChunkUnlockType fill = type;
+			if (fill == ChunkUnlockType.FREE)
+			{
+				fill = nextToPaidChunk(unlockedRegions, regionId) ? ChunkUnlockType.UNLOCKED : ChunkUnlockType.LOCKED;
+			}
+			chunkUnlocked[regionId] = unlocked;
+			chunkOpen[regionId] = isOpen(unlockedRegions, regionId);
+			chunkFill[regionId] = (byte) fill.ordinal();
+			chunkType[regionId] = (byte) (type.ordinal() + 1);
+		}
+		return TYPES[chunkType[regionId] - 1];
+	}
+
+	private boolean unlockedAt(int regionId)
+	{
+		return regionId >= 0 && regionId < REGIONS && chunkUnlocked[regionId];
+	}
+
+	private boolean openAt(int regionId)
+	{
+		return regionId >= 0 && regionId < REGIONS && chunkOpen[regionId];
+	}
+
+	/**
+	 * The line between two chunks shows unless both sides are unlocked (with "Lines Between
+	 * Unlocked Chunks" off), so your unlocked area reads as one piece of map.
+	 */
+	private boolean edge(boolean gridLines, int a, int b)
+	{
+		return gridLines || !(unlockedAt(a) && openAt(b)) || !(unlockedAt(b) && openAt(a));
+	}
+
+	/** The chunk tints, borders, cost labels and region id, for {@code view}. */
+	private void drawChunks(Graphics2D graphics, MapView view, boolean preview, Set<String> unlockedRegions,
+		Set<Integer> neighborRegions, int currentRegionId)
+	{
+		boolean gridLines = config.showChunkGridLines();
+		boolean costLabels = config.showChunkCostLabels();
+		int size = view.size;
+		int columns = Math.max(0, (view.xRegionMax - view.xRegionMin) / REGION_SIZE);
+		int rows = Math.max(0, (view.yRegionMax - view.yRegionMin) / REGION_SIZE);
+		if (columns == 0 || rows == 0)
+		{
+			return;
+		}
+		checkChunks(preview, unlockedRegions, neighborRegions);
+		int rx0 = view.xRegionMin >> 6;
+		int ry0 = view.yRegionMin >> 6;
+		// The chunks one past each side too, for the lines along the view's edges.
+		for (int i = -1; i <= columns; i++)
+		{
+			for (int j = -1; j <= rows; j++)
+			{
+				chunk(((rx0 + i) << 8) | (ry0 + j), preview, unlockedRegions, neighborRegions);
+			}
+		}
+
+		// The tints: one pixel per chunk, stretched over the map in a single draw (north up,
+		// so the picture's top row is the northernmost chunks).
+		Color[] fills = new Color[TYPES.length];
+		for (ChunkUnlockType t : TYPES)
+		{
+			fills[t.ordinal()] = fillFor(t);
+		}
+		BufferedImage tints = new BufferedImage(columns, rows, BufferedImage.TYPE_INT_ARGB);
+		for (int i = 0; i < columns; i++)
+		{
+			for (int j = 0; j < rows; j++)
+			{
+				int regionId = ((rx0 + i) << 8) | (ry0 + j);
+				Color fill = fills[chunkFill[regionId]];
+				int argb = fill.getRGB();
+				if (regionId == hoveredRegionId && fill.getAlpha() > HOVER_ALPHA)
+				{
+					argb = (HOVER_ALPHA << 24) | (argb & 0xFFFFFF);
+				}
+				tints.setRGB(i, rows - 1 - j, argb);
+			}
+		}
+		int left = view.x(view.xRegionMin);
+		int right = view.x(view.xRegionMax);
+		int top = view.y(view.yRegionMax) + size;
+		int bottom = view.y(view.yRegionMin) + size;
+		Object interpolation = graphics.getRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION);
+		graphics.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+			java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+		graphics.drawImage(tints, left, top, right, bottom, 0, 0, columns, rows, null);
+		if (interpolation != null)
+		{
+			graphics.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, interpolation);
+		}
+
+		// The lines between chunks: each straight run drawn as one line.
+		graphics.setColor(GRID_LINE);
+		for (int i = 0; i <= columns; i++)
+		{
+			int x = view.x(view.xRegionMin + i * REGION_SIZE);
+			int runEnd = Integer.MIN_VALUE;
+			int runStart = 0;
+			for (int j = 0; j < rows; j++)
+			{
+				int east = ((rx0 + i) << 8) | (ry0 + j);
+				int y = view.y(view.yRegionMin + j * REGION_SIZE);
+				if (edge(gridLines, east - 256, east))
+				{
+					if (runEnd == Integer.MIN_VALUE)
+					{
+						runEnd = y + size;
+					}
+					runStart = y;
+				}
+				else if (runEnd != Integer.MIN_VALUE)
+				{
+					graphics.drawLine(x, runStart, x, runEnd);
+					runEnd = Integer.MIN_VALUE;
+				}
+			}
+			if (runEnd != Integer.MIN_VALUE)
+			{
+				graphics.drawLine(x, runStart, x, runEnd);
+			}
+		}
+		for (int j = 0; j <= rows; j++)
+		{
+			int y = view.y(view.yRegionMin + j * REGION_SIZE) + size;
+			int runStart = Integer.MIN_VALUE;
+			int runEnd = 0;
+			for (int i = 0; i < columns; i++)
+			{
+				int north = ((rx0 + i) << 8) | (ry0 + j);
+				int x = view.x(view.xRegionMin + i * REGION_SIZE);
+				if (edge(gridLines, north - 1, north))
+				{
+					if (runStart == Integer.MIN_VALUE)
+					{
+						runStart = x;
+					}
+					runEnd = x + size;
+				}
+				else if (runStart != Integer.MIN_VALUE)
+				{
+					graphics.drawLine(runStart, y, runEnd, y);
+					runStart = Integer.MIN_VALUE;
+				}
+			}
+			if (runStart != Integer.MIN_VALUE)
+			{
+				graphics.drawLine(runStart, y, runEnd, y);
+			}
+		}
+
+		// What it costs, written in the middle of every unlockable chunk (zoomed in far enough).
+		if (costLabels && size >= MIN_LABEL_CHUNK_PIXELS)
+		{
+			for (int i = 0; i < columns; i++)
+			{
+				for (int j = 0; j < rows; j++)
+				{
+					int regionId = ((rx0 + i) << 8) | (ry0 + j);
+					ChunkUnlockType type = TYPES[chunkType[regionId] - 1];
+					if (type.isUnlockable())
+					{
+						drawCostLabel(graphics, view.x(view.xRegionMin + i * REGION_SIZE),
+							view.y(view.yRegionMin + j * REGION_SIZE), size,
+							ChunkUnlockType.costLabel(plugin, regionId, type), type.color);
+					}
+				}
+			}
+		}
+
+		Font regionFont = FontManager.getRunescapeBoldFont().deriveFont(14f);
+		graphics.setFont(regionFont);
+		int hx = (hoveredRegionId >> 8) - rx0;
+		int hy = (hoveredRegionId & 0xFF) - ry0;
+		if (hoveredRegionId > 0 && hx >= 0 && hx < columns && hy >= 0 && hy < rows)
+		{
+			ChunkUnlockType type = TYPES[chunkType[hoveredRegionId] - 1];
+			int xPos = view.x(view.xRegionMin + hx * REGION_SIZE);
+			int yPos = view.y(view.yRegionMin + hy * REGION_SIZE);
+			// Hover emphasis on unlockable chunks (outline only, no fill).
+			if (type.isUnlockable())
+			{
+				graphics.setColor(CHUNK_BORDER);
+				graphics.drawRect(xPos + 1, yPos + 1, size - 2, size - 2);
+			}
+			// Region ID in the top-left corner, only on the chunk under the mouse, so the
+			// zoomed-out map isn't covered in numbers.
+			String idText = String.valueOf(hoveredRegionId);
+			int textX = xPos + 4;
+			int textY = yPos + 16;
+			if (textX > view.rect.getX() && textY > view.rect.getY())
+			{
+				graphics.setColor(Color.BLACK);
+				graphics.drawString(idText, textX + 1, textY + 1);
+				// Same colour family as the chunk's tint, solid so it stays readable.
+				graphics.setColor(type.color);
+				graphics.drawString(idText, textX, textY);
+			}
+		}
+
+		// Current chunk: a double cyan outline, drawn after every other line so nothing covers it.
+		int cx = (currentRegionId >> 8) - rx0;
+		int cy = (currentRegionId & 0xFF) - ry0;
+		if (currentRegionId > 0 && cx >= 0 && cx < columns && cy >= 0 && cy < rows)
+		{
+			int xPos = view.x(view.xRegionMin + cx * REGION_SIZE);
+			int yPos = view.y(view.yRegionMin + cy * REGION_SIZE);
+			graphics.setColor(CURRENT_BORDER);
+			graphics.drawRect(xPos, yPos, size, size);
+			graphics.drawRect(xPos + 1, yPos + 1, size - 2, size - 2);
+		}
+
+		// Region ID in the top-left corner of the world map: the hovered chunk's, else yours.
+		drawRegionIdDisplay(graphics, view.rect, hoveredRegionId > 0 ? hoveredRegionId : currentRegionId);
 	}
 
 	private void drawRegionIdDisplay(Graphics2D graphics, Rectangle worldMapRect, int regionId)
@@ -470,6 +690,12 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		graphics.drawString(regionIdText, textX, textY);
 	}
 
+	/** The chunk's name for a tooltip, without its "(region id)" number. */
+	private String tooltipName(int regionId)
+	{
+		return plugin.getRegionName(regionId).replaceAll("\\s*\\(\\d+\\)$", "").trim();
+	}
+
 	private void drawHoverTooltip(Graphics2D graphics, Point mousePos, int regionId)
 	{
 		if (mousePos == null)
@@ -477,7 +703,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 			return;
 		}
 
-		String regionName = plugin.getRegionName(regionId);
+		String regionName = tooltipName(regionId);
 		int unlockCost = plugin.getRegionUnlockCost(regionId);
 		int playerPoints = plugin.getTotalPoints();
 		boolean isBoss = plugin.isBossRegion(regionId);
@@ -514,7 +740,6 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		{
 			line3 = "Hold " + config.worldMapUnlockKey() + " + click to unlock";
 		}
-
 
 		// Setup font
 		Font font = FontManager.getRunescapeSmallFont();
@@ -557,10 +782,13 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		graphics.drawString(line3, textX, textY);
 	}
 
-
 	/** Unlocked, or an always-open area such as a dungeon (same test as the chunk fill). */
 	private boolean isOpen(Set<String> unlockedRegions, int regionId)
 	{
+		if (plugin.isTutorialPreview())
+		{
+			return plugin.isPracticeUnlocked(regionId);
+		}
 		return unlockedRegions.contains(String.valueOf(regionId)) || plugin.isFreeRegion(regionId);
 	}
 
@@ -571,7 +799,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 		{
 			return;
 		}
-		String line1 = plugin.getRegionName(regionId);
+		String line1 = tooltipName(regionId);
 		String line2 = "Unlocked";
 		String line3 = "Hold " + config.worldMapTasksKey() + " + click to view tasks";
 
@@ -628,7 +856,7 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 	}
 
 	/** Shared with WorldMapLegendOverlay, so the legend always matches the map. */
-	static Color fillFor(ChunkBlazerConfig config, ChunkUnlockType type)
+	public static Color fillFor(ChunkBlazerConfig config, ChunkUnlockType type)
 	{
 		switch (type)
 		{
@@ -636,8 +864,6 @@ class ChunkBlazerWorldMapOverlay extends Overlay
 				return config.worldMapLockedColor();
 			case PAID:
 				return config.worldMapPaidColor();
-			case FREE:
-				return config.worldMapFreeColor();
 			case CHARTER:
 				return config.worldMapCharterColor();
 			case BOSS:

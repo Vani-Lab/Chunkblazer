@@ -28,6 +28,7 @@ package com.chunkblazer;
 
 import java.awt.event.MouseEvent;
 import javax.inject.Inject;
+import javax.inject.Provider;
 import javax.inject.Singleton;
 import net.runelite.client.input.MouseAdapter;
 
@@ -42,17 +43,19 @@ import net.runelite.client.input.MouseAdapter;
 @Singleton
 public class TaskCardInput extends MouseAdapter
 {
-	private final TaskCardOverlay overlay;
+	// ChunkBlazer UI's cards, or the plain ones (asked when clicked).
+	private final Provider<ChunkBlazerUi> ui;
 
 	@Inject
-	private TaskCardInput(TaskCardOverlay overlay)
+	private TaskCardInput(Provider<ChunkBlazerUi> ui)
 	{
-		this.overlay = overlay;
+		this.ui = ui;
 	}
 
 	@Override
 	public MouseEvent mousePressed(MouseEvent event)
 	{
+		TaskCardShow overlay = ui.get().cards();
 		if (event.getButton() != MouseEvent.BUTTON1 || !overlay.isActive())
 		{
 			return event;

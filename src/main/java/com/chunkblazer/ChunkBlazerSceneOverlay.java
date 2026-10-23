@@ -29,7 +29,6 @@ package com.chunkblazer;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import javax.inject.Inject;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.Scene;
@@ -44,7 +43,6 @@ import net.runelite.client.ui.overlay.OverlayPriority;
  * {@link ChunkBorderRenderer}, which is a separate, unit-tested class.
  * This overlay only wires the lifecycle into RuneLite's overlay system.
  */
-@Slf4j
 public class ChunkBlazerSceneOverlay extends Overlay
 {
 	private final Client client;
@@ -52,6 +50,8 @@ public class ChunkBlazerSceneOverlay extends Overlay
 	private final ChunkBlazerConfig config;
 	private final ChunkBorderRenderer renderer;
 	private final ChunkWallOverlay walls;
+	@Inject
+	private CompanionPrompt addOns;
 
 	@Inject
 	public ChunkBlazerSceneOverlay(Client client, ChunkBlazerPlugin plugin, ChunkBlazerConfig config,
@@ -76,7 +76,8 @@ public class ChunkBlazerSceneOverlay extends Overlay
 		walls.render(graphics);
 		// (The chunk name banner is its own always-on-top overlay: ChunkNameBanner.)
 
-		if (!config.showSceneChunks())
+		SceneBorders borders = config.sceneChunkBorders();
+		if (borders == SceneBorders.OFF || borders == SceneBorders.AUTO && addOns.anyOn())
 		{
 			return null;
 		}

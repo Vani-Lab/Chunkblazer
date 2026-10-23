@@ -30,6 +30,7 @@ import com.google.common.hash.Hashing;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -86,6 +87,7 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.events.PluginMessage;
 import net.runelite.client.events.ProfileChanged;
 import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.client.plugins.Plugin;
@@ -160,9 +162,6 @@ public class ChunkBlazerPlugin extends Plugin
 	private ChunkBlazerOrbWidget orbWidget;
 
 	@Inject
-	private TaskCompletionAnimationOverlay taskCompletionAnimationOverlay;
-
-	@Inject
 	private TaskModuleManager taskModuleManager;
 
 	@Inject
@@ -190,19 +189,17 @@ public class ChunkBlazerPlugin extends Plugin
 	private net.runelite.client.input.MouseManager mouseManager;
 
 	@Inject
+	private CompanionPrompt companionPrompt;
+
+	@Inject
 	private ChunkBlazerInput inputListener;
 
+	// ChunkBlazer UI (the task window, animated cards, tutorial...), or CoreOnlyUi without it.
 	@Inject
-	private TaskCardOverlay taskCardOverlay;
+	private ChunkBlazerUi ui;
 
 	@Inject
-	private SelectedTaskOverlay selectedTaskOverlay;
-
-	@Inject
-	private TaskTargetHighlighter taskTargetHighlighter;
-
-	@Inject
-	private SelectedTaskOverlayInput selectedTaskOverlayInput;
+	private ChunkWallOverlay chunkWallOverlay;
 
 	@Inject
 	private net.runelite.client.eventbus.EventBus eventBus;
@@ -221,7 +218,6 @@ public class ChunkBlazerPlugin extends Plugin
 	@Getter
 	private NuzlockeTask activeTask; // Legacy single task for backward compatibility
 
-	@Getter
 	private final List<NuzlockeTask> activeTasks = new CopyOnWriteArrayList<>(); // All active tasks for current region (thread-safe)
 
 	// The "Global Tasks" pool: quest tasks that belong to no chunk, are free for
@@ -315,6 +311,7 @@ public class ChunkBlazerPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		companionPrompt.start();
 		// @Singleton survives disable/enable.
 		serverBackoff.reset();
 		syncRejectedKey = null;
@@ -443,6 +440,11 @@ public class ChunkBlazerPlugin extends Plugin
 
 		clientToolbar.addNavigation(navButton);
 
+		// The new-player tutorial (ChunkBlazer UI) runs before a mode is picked, so it isn't part of setModeReady.
+		ui.startUp();
+		// Hears ChunkBlazer GPU's unlock sweeps, to leave the reveal to it.
+		eventBus.register(chunkWallOverlay);
+
 		// The in-game UI starts once the account has a mode; see setModeReady.
 		// Load or assign a task if player is logged in
 		if (client.getGameState() == GameState.LOGGED_IN)
@@ -468,12 +470,16 @@ public class ChunkBlazerPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		companionPrompt.stop();
 		if (syncFuture != null)
 		{
 			syncFuture.cancel(false);
 			syncFuture = null;
 		}
 		clientToolbar.removeNavigation(navButton);
+		ui.shutDown();
+		eventBus.unregister(chunkWallOverlay);
+		showChunkView(false);
 		setModeReady(false);
 		taskModuleManager.shutDown();
 		if (soundManager != null)
@@ -492,6 +498,99 @@ public class ChunkBlazerPlugin extends Plugin
 	}
 
 	/**
+	 * The tutorial's view of Tutorial Island, before a mode is picked: the maps and walls, plus
+	 * the task UI (cards, orbs, task window, task box) for its practice tasks, but none of the
+	 * unlocking. setModeReady owns all of it after that, and closes this view first.
+	 */
+	void showChunkView(boolean show)
+	{
+		if (modeReady || show == tutorialView)
+		{
+			return;
+		}
+		tutorialView = show;
+		for (net.runelite.client.ui.overlay.Overlay overlay : Arrays.asList(worldMapOverlay, minimapOverlay, sceneOverlay))
+		{
+			if (show)
+			{
+				overlayManager.add(overlay);
+			}
+			else
+			{
+				overlayManager.remove(overlay);
+			}
+		}
+		ui.showGameUi(show);
+		if (show)
+		{
+			mouseManager.registerMouseListener(taskCardInput);
+			clientThread.invoke(orbWidget::startUp);
+			panel.updateModeDisplay();
+			return;
+		}
+		panel.updateModeDisplay();
+		mouseManager.unregisterMouseListener(taskCardInput);
+		clientThread.invoke(orbWidget::shutDown);
+	}
+
+	private boolean tutorialView;
+
+	/** What a practice task outlines in game ("npc:..." or "object:..."), or null for any other task. */
+	String getPracticeTarget(String taskId)
+	{
+		return isPracticeShown() ? ui.tutorial().practiceTarget(taskId) : null;
+	}
+
+	/** On Tutorial Island without a mode: the side panel shows the tutorial's tasks, not the mode picker. */
+	boolean isOnTutorialIsland()
+	{
+		return !isModeLocked() && ui.tutorial().isOnIsland();
+	}
+
+	void refreshPanel()
+	{
+		panel.updatePanel();
+	}
+
+	boolean isTaskCardsOn()
+	{
+		return config.showTaskCards();
+	}
+
+	/** A practice task done: the usual completion popup, worth 0. */
+	void showPracticeComplete(NuzlockeTask task)
+	{
+		if (config.showTaskCompletionPopup())
+		{
+			ui.showTaskCompletion(task, 0, "Tutorial Island");
+		}
+	}
+
+	/** A Tutorial Island chunk unlocked as practice by the tutorial: shown unlocked, never saved. */
+	boolean isPracticeUnlocked(int regionId)
+	{
+		return ui.tutorial().isPracticeUnlocked(regionId);
+	}
+
+	/** The tutorial's locked view of Tutorial Island: only its practice chunks show as unlocked. */
+	boolean isTutorialPreview()
+	{
+		return !modeReady && ui.tutorial().isPreview();
+	}
+
+	/** The tutorial's practice tasks stand in for real ones: on the island, before a mode. */
+	private boolean isPracticeShown()
+	{
+		return isTutorialPreview() && ui.tutorial().isOnIsland();
+	}
+
+	/** Where the Boss Token orb is on screen, for the tutorial to point at (null if hidden). */
+	Rectangle getBossOrbBounds()
+	{
+		return orbWidget.bossOrbBounds();
+	}
+
+	/**
 	 * Start or stop everything the player sees and clicks in-game as one unit: overlays,
 	 * minimap orbs, the task window and their input listeners. It only runs while the
 	 * account has a mode, so until one is picked the side panel's mode picker is all
@@ -502,6 +601,10 @@ public class ChunkBlazerPlugin extends Plugin
 		if (ready == modeReady)
 		{
 			return;
+		}
+		if (ready)
+		{
+			showChunkView(false);
 		}
 		modeReady = ready;
 		if (ready)
@@ -518,19 +621,12 @@ public class ChunkBlazerPlugin extends Plugin
 			// Register scene overlay that draws chunk borders + locked-chunk wash on the gameplay screen
 			overlayManager.add(sceneOverlay);
 
-			// Register animated task completion overlay
-			overlayManager.add(taskCompletionAnimationOverlay);
-
-			// Task reveal cards. The mouse listener has to be registered alongside the
-			// overlay: it is what turns a click on a card into a flip (and swallows that
-			// click so it doesn't also walk the player into the middle of the screen).
-			overlayManager.add(taskCardOverlay);
+			// ChunkBlazer UI's completion popup, task cards, task box and target outlines
+			// (just the cards without it). The cards' mouse listener has to be registered alongside: it
+			// is what turns a click on a card into a flip (and swallows that click so it
+			// doesn't also walk the player into the middle of the screen).
+			ui.showGameUi(true);
 			mouseManager.registerMouseListener(taskCardInput);
-
-			overlayManager.add(selectedTaskOverlay);
-			overlayManager.add(taskTargetHighlighter);
-			eventBus.register(taskTargetHighlighter);
-			mouseManager.registerMouseListener(selectedTaskOverlayInput);
 
 			clientThread.invoke(orbWidget::startUp);
 			return;
@@ -541,18 +637,11 @@ public class ChunkBlazerPlugin extends Plugin
 		worldMapUnlockKeyPressed = false;
 		overlayManager.remove(minimapOverlay);
 		overlayManager.remove(sceneOverlay);
-		overlayManager.remove(selectedTaskOverlay);
-		eventBus.unregister(taskTargetHighlighter);
-		mouseManager.unregisterMouseListener(selectedTaskOverlayInput);
-		overlayManager.remove(taskTargetHighlighter);
-		taskTargetHighlighter.reset();
-		overlayManager.remove(taskCompletionAnimationOverlay);
-		overlayManager.remove(taskCardOverlay);
+		// Also drops the cards WITHOUT revealing: the pending set is durable, so they are
+		// still waiting on the next startup. Revealing here would flip them for free.
+		ui.showGameUi(false);
 		clientThread.invoke(orbWidget::shutDown);
 		mouseManager.unregisterMouseListener(taskCardInput);
-		// Drop cards WITHOUT revealing: the pending set is durable, so they are still
-		// waiting on the next startup. Revealing here would flip them for free.
-		taskCardOverlay.clear();
 	}
 
 	@Provides
@@ -895,6 +984,7 @@ public class ChunkBlazerPlugin extends Plugin
 		// once, and the per-task settle-up path freezes the client at that volume
 		// (see completeTasks()). Coalescing keeps it to a single settle-up per tick.
 		flushPendingCompletions();
+		publishAffordableChunks();
 
 		if (!heldInArena.isEmpty() && !inPracticeArena())
 		{
@@ -920,7 +1010,7 @@ public class ChunkBlazerPlugin extends Plugin
 		{
 			grandfatherCasual();
 		}
-		if (!modeReady && isModeLocked())
+		if (!modeReady && isModeLocked() && !ui.tutorial().holdsUnlock())
 		{
 			setModeReady(true);
 			if (!pendingProfileBootstrap)
@@ -955,7 +1045,11 @@ public class ChunkBlazerPlugin extends Plugin
 		}
 
 		// Starting tasks wait on the sync choice (canRollMissing); say so once per session.
-		if (!syncChoiceNoticeShown && !config.apiEnabled() && !canRollMissing())
+		if (ui.tutorial().isQuiet())
+		{
+			// The tutorial walks new players through these.
+		}
+		else if (!syncChoiceNoticeShown && !config.apiEnabled() && !canRollMissing())
 		{
 			syncChoiceNoticeShown = true;
 			addPluginChatMessage("Choose Enable Sync or Play offline in the ChunkBlazer panel to get your starting tasks.");
@@ -1082,6 +1176,11 @@ public class ChunkBlazerPlugin extends Plugin
 		}
 		// Swallow the default world-map click so it doesn't also pan/select.
 		event.consume();
+		if (isFreeUnlockableRegion(regionId))
+		{
+			unlockRegion(regionId); // free: nothing to confirm
+			return;
+		}
 		showChatboxUnlockPopup(regionId);
 	}
 
@@ -1183,6 +1282,36 @@ public class ChunkBlazerPlugin extends Plugin
 	}
 
 	private final UnlockInputs unlockInputs = new UnlockInputs();
+
+	// Neighbouring chunks the player could unlock right now, for ChunkBlazer GPU: its flame
+	// walls only open up round the player at those.
+	private String lastAffordableChunks;
+	private String lastAffordableProfile;
+
+	private void publishAffordableChunks()
+	{
+		StringBuilder out = new StringBuilder();
+		if (isAccountStateAvailable() && !isTutorialPreview())
+		{
+			int points = getTotalPoints();
+			int tokens = getBossTokens();
+			for (int regionId : getNeighborRegionIds())
+			{
+				if (isBossRegion(regionId) ? tokens > 0 : points >= getRegionUnlockCost(regionId))
+				{
+					out.append(out.length() == 0 ? "" : ",").append(regionId);
+				}
+			}
+		}
+		String value = out.toString();
+		String profile = configManager.getRSProfileKey();
+		if (profile != null && (!value.equals(lastAffordableChunks) || !profile.equals(lastAffordableProfile)))
+		{
+			lastAffordableChunks = value;
+			lastAffordableProfile = profile;
+			configManager.setRSProfileConfiguration(CONFIG_GROUP, "affordableChunks", value);
+		}
+	}
 
 	private void showChatboxUnlockPopup(int regionId)
 	{
@@ -1428,7 +1557,7 @@ public class ChunkBlazerPlugin extends Plugin
 	 * store has no such file; callers log and skip. Post-migration there is no
 	 * bundled raw JSON — the gzipped seed is the offline floor (see CatalogStore).
 	 */
-	private String readTaskFileContent(String filename)
+	String readTaskFileContent(String filename)
 	{
 		return catalogStore != null ? catalogStore.getFileContent(filename) : null;
 	}
@@ -1461,6 +1590,7 @@ public class ChunkBlazerPlugin extends Plugin
 		allChunks.clear();
 		chunksByRegionId.clear();
 		TaskTargetExtras.load(readTaskFileContent("_Target_Extras.json"), gson);
+		TaskSources.load(gson);
 
 
 		Type mapType = new TypeToken<Map<String, List<NuzlockeChunk>>>()
@@ -1954,8 +2084,18 @@ public class ChunkBlazerPlugin extends Plugin
 	 * {@link #backfillAndRegisterGlobalTasks()}, which is what actually stops
 	 * them scoring. Both read the same baseline, so they can't disagree.
 	 */
+	/** All active tasks; the tutorial's practice tasks while it shows Tutorial Island. */
+	public List<NuzlockeTask> getActiveTasks()
+	{
+		return isPracticeShown() ? ui.tutorial().practiceActive() : activeTasks;
+	}
+
 	public List<NuzlockeTask> getVisibleGlobalTasks()
 	{
+		if (isPracticeShown())
+		{
+			return new ArrayList<>();
+		}
 		Map<String, Integer> baseline = progressionBaselineForCurrentAccount();
 		if (baseline.isEmpty())
 		{
@@ -2922,6 +3062,39 @@ public class ChunkBlazerPlugin extends Plugin
 	 * as we're logged in — deferred because the eligibility + verification calls need
 	 * the api_key that login provides. If sync is already on, start the lock now.
 	 */
+	/**
+	 * Competitive from the tutorial's picker: straight away once Server Sync is logged in,
+	 * otherwise as soon as it is (turning it on if need be), like the side panel's.
+	 */
+	void lockCompetitive()
+	{
+		if (config.apiEnabled() && serverLoginDone)
+		{
+			lockGameMode(GameMode.NUZLOCKE);
+			return;
+		}
+		pendingCompetitiveLock = true;
+		if (!config.apiEnabled())
+		{
+			enableServerSync();
+		}
+	}
+
+	/** Competitive picked, then "Choose again": drop its pending check and code. */
+	void cancelPendingCompetitive()
+	{
+		pendingCompetitiveLock = false;
+		pendingNuzlockeSnapshot = null;
+		pendingVerificationNonce = null;
+		panel.hideVerificationPrompt();
+	}
+
+	/** The chat code waiting to be typed (verification or Competitive), or null. */
+	String getPendingVerificationCode()
+	{
+		return pendingVerificationNonce;
+	}
+
 	public void enableServerSyncAndLockCompetitive()
 	{
 		if (config.apiEnabled())
@@ -3467,6 +3640,31 @@ public class ChunkBlazerPlugin extends Plugin
 	 * their visibility only refreshed on a login — so flipping the toggle mid
 	 * session left them hidden until a relog. Refresh the panel on the change.
 	 */
+	/**
+	 * Messages from ChunkBlazer GPU (RuneLite's plugin-to-plugin channel; neither
+	 * plugin depends on the other). It says when a chunk's unlock sweep starts and
+	 * finishes, so the new task cards wait until it has played. A test sweep
+	 * ("Play Unlock On Test Chunk") deals demo cards, since it unlocks nothing.
+	 */
+	@Subscribe
+	public void onPluginMessage(PluginMessage message)
+	{
+		if (!"chunkblazer".equals(message.getNamespace()))
+		{
+			return;
+		}
+		if ("unlockSweepStarted".equals(message.getName()))
+		{
+			Object duration = message.getData().get("durationMs");
+			ui.cards().onSweepStarted(Boolean.TRUE.equals(message.getData().get("test")),
+				duration instanceof Number ? ((Number) duration).longValue() : 0);
+		}
+		else if ("unlockSweepFinished".equals(message.getName()))
+		{
+			ui.cards().onSweepFinished();
+		}
+	}
+
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
@@ -3667,7 +3865,26 @@ public class ChunkBlazerPlugin extends Plugin
 			panel.hideVerificationPrompt();
 			return;
 		}
+		if (client.getVarpValue(VarPlayerID.TUTORIAL) < 1000)
+		{
+			// No public chat on Tutorial Island: ask for the code once the player reaches the mainland.
+			verificationDeferred = true;
+			return;
+		}
 		requestAndShowVerification();
+	}
+
+	// An unverified account's chat code, held back while it's on Tutorial Island.
+	private volatile boolean verificationDeferred;
+
+	/** Off Tutorial Island: now there's public chat, ask for any verification code held back. */
+	void leftTutorialIsland()
+	{
+		if (verificationDeferred)
+		{
+			verificationDeferred = false;
+			requestAndShowVerification();
+		}
 	}
 
 	/**
@@ -3892,8 +4109,18 @@ public class ChunkBlazerPlugin extends Plugin
 	 * for cheap change-detection; exposed so that read goes through the per-account
 	 * abstraction rather than the global typed accessor.
 	 */
+	/** The stored completed-task list as it is (cheap to compare: ChunkBlazer UI's change check). */
+	String getCompletedTasksRaw()
+	{
+		return acStr("completedTasks", "");
+	}
+
 	public String getUnrevealedTasksRaw()
 	{
+		if (isPracticeShown())
+		{
+			return String.join(",", ui.tutorial().practiceCards());
+		}
 		return acStr("unrevealedTasks", "");
 	}
 
@@ -3955,7 +4182,27 @@ public class ChunkBlazerPlugin extends Plugin
 		{
 			return;
 		}
+		if ("unlockedChunks".equals(key))
+		{
+			// Every unlock path saves through here. TaskCardOverlay uses this to
+			// hold a fresh deal back until ChunkBlazer GPU's unlock sweep has played.
+			lastUnlockChangeMs = System.currentTimeMillis();
+		}
 		configManager.setRSProfileConfiguration(CONFIG_GROUP, key, value);
+	}
+
+	/** Where revealed task cards fly to: the Tasks orb's centre on the canvas, or null. */
+	public java.awt.Point getTasksOrbCentre()
+	{
+		return orbWidget == null ? null : orbWidget.getTasksOrbCentre();
+	}
+
+	/** Wall-clock ms the unlocked-chunk list last changed (0 if not this session). */
+	private volatile long lastUnlockChangeMs;
+
+	public long getLastUnlockChangeMs()
+	{
+		return lastUnlockChangeMs;
 	}
 
 	/**
@@ -4808,7 +5055,11 @@ public class ChunkBlazerPlugin extends Plugin
 		// locked or greyed, no unlock needed. They aren't part of the chunk
 		// challenge. This single check makes them read as "unlocked" everywhere
 		// (greyscale, prompts, map borders).
-		if (isFreeRegion(regionId))
+		if (isTutorialPreview())
+		{
+			return isPracticeUnlocked(regionId);
+		}
+		if (isFreeRegion(regionId) || isPracticeUnlocked(regionId))
 		{
 			return true;
 		}
@@ -5149,6 +5400,10 @@ public class ChunkBlazerPlugin extends Plugin
 	 */
 	public int getTaskTargetQuantity(String taskId)
 	{
+		if (isPracticeShown() && ui.tutorial().practiceTask(taskId) != null)
+		{
+			return 1;
+		}
 		int saved = loadTaskProgressAndTarget(taskId)[1];
 		if (saved > 0)
 		{
@@ -5494,6 +5749,10 @@ public class ChunkBlazerPlugin extends Plugin
 	/** Task ids rolled but not yet flipped, in a stable order for a stable card layout. */
 	public List<String> getUnrevealedTaskIds()
 	{
+		if (isPracticeShown())
+		{
+			return ui.tutorial().practiceCards();
+		}
 		String data = acStr("unrevealedTasks", "");
 		if (data == null || data.isEmpty())
 		{
@@ -5545,6 +5804,11 @@ public class ChunkBlazerPlugin extends Plugin
 	 */
 	public void revealTaskCard(String taskId)
 	{
+		if (isPracticeShown())
+		{
+			ui.tutorial().revealPractice(taskId);
+			return;
+		}
 		List<String> pending = getUnrevealedTaskIds();
 		if (!pending.remove(taskId))
 		{
@@ -5664,7 +5928,8 @@ public class ChunkBlazerPlugin extends Plugin
 	/** Exposed for the card overlay, which only has ids to work with. */
 	public NuzlockeTask getTaskById(String taskId)
 	{
-		return findTaskById(taskId);
+		NuzlockeTask practice = isPracticeShown() ? ui.tutorial().practiceTask(taskId) : null;
+		return practice != null ? practice : findTaskById(taskId);
 	}
 
 	/**
@@ -5860,9 +6125,9 @@ public class ChunkBlazerPlugin extends Plugin
 		int shown = 0;
 		for (NuzlockeTask task : batch)
 		{
-			if (taskCompletionAnimationOverlay != null && shown < COMPLETION_ANIM_CAP)
+			if (shown < COMPLETION_ANIM_CAP)
 			{
-				taskCompletionAnimationOverlay.showTaskCompletion(
+				ui.showTaskCompletion(
 					task, task.getBasePoints(), getTaskCompletionLabel(task));
 				shown++;
 			}
@@ -5981,7 +6246,7 @@ public class ChunkBlazerPlugin extends Plugin
 	 */
 	public Set<String> getCompletedTaskIdSet()
 	{
-		return getCompletedTaskIds();
+		return isPracticeShown() ? ui.tutorial().practiceCompleted() : getCompletedTaskIds();
 	}
 
 	private Set<String> getCompletedTaskIds()
@@ -6782,7 +7047,7 @@ public class ChunkBlazerPlugin extends Plugin
 		{
 			return false;
 		}
-		for (NuzlockeChunk chunk : new HashSet<>(chunksByRegionId.values()))
+		for (NuzlockeChunk chunk : distinctChunks())
 		{
 			// A boss chunk may carry one boss key (ToA/CoX) or several on one region
 			// (Scurrius + Bryophyta) — match against the whole set so each boss's first
@@ -6931,6 +7196,17 @@ public class ChunkBlazerPlugin extends Plugin
 
 	// --- World Map Helper Methods ---
 
+	/**
+	 * Each chunk once (several regions can share one). By identity: a chunk's own hashCode
+	 * covers all of its tasks, and this is asked for every frame the world map is open.
+	 */
+	private Set<NuzlockeChunk> distinctChunks()
+	{
+		Set<NuzlockeChunk> chunks = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+		chunks.addAll(chunksByRegionId.values());
+		return chunks;
+	}
+
 	public Set<Integer> getNeighborRegionIds()
 	{
 		Set<Integer> neighbors = new HashSet<>();
@@ -7007,7 +7283,7 @@ public class ChunkBlazerPlugin extends Plugin
 		// its OWN neighbor_ids is unlocked — the same reverse-adjacency trick as the
 		// Prifddinas bridge, but self-contained so no existing chunk data needs
 		// editing. The Boss-Token spend still gates the actual unlock (unlockRegion).
-		for (NuzlockeChunk chunk : new HashSet<>(chunksByRegionId.values()))
+		for (NuzlockeChunk chunk : distinctChunks())
 		{
 			if (chunk == null || !chunk.isBoss()
 				|| chunk.getNeighborIds() == null || chunk.getRegionIds() == null)
@@ -7348,6 +7624,17 @@ public class ChunkBlazerPlugin extends Plugin
 	 * config toggle is off. Should only be called on the FIRST unlock of a
 	 * region — callers are responsible for the wasAlreadyUnlocked check.
 	 */
+	/** The task complete sound for the chunk you're in, as a real completion would play it (the popup's Test). */
+	void playTaskCompleteSound()
+	{
+		if (!config.playTaskCompletionSound() || soundManager == null)
+		{
+			return;
+		}
+		NuzlockeChunk chunk = chunksByRegionId.get(getCurrentRegionId());
+		playAreaSoundAsync(chunk == null ? null : chunk.getArea());
+	}
+
 	private void playRegionUnlockJingle(int regionId)
 	{
 		if (!config.playRegionUnlockSound())

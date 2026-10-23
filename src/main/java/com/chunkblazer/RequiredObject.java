@@ -164,6 +164,11 @@ public class RequiredObject
 				ro.setQuantityRange(range);
 			}
 
+			// Passed between ChunkBlazer and ChunkBlazer UI with this session's roll (never in the catalog).
+			if (obj.has("rolledQuantity") && obj.get("rolledQuantity").isJsonPrimitive())
+			{
+				ro.rolledQuantity = obj.get("rolledQuantity").getAsInt();
+			}
 			return ro;
 		}
 	}

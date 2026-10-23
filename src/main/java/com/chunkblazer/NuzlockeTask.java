@@ -247,15 +247,6 @@ public class NuzlockeTask
 		return isUnlocked != null && !isUnlocked;
 	}
 
-	public String getDisplayName()
-	{
-		if (targetQuantity > 1)
-		{
-			return name + " (0/" + targetQuantity + ")";
-		}
-		return name;
-	}
-
 	/**
 	 * Custom deserializer that handles flexible JSON formats for NuzlockeTask.
 	 * Specifically handles required_items being an object instead of array.
@@ -398,6 +389,20 @@ public class NuzlockeTask
 			// Note required_object presence (don't fully parse; AgilityModule
 			// only needs to know lap vs shortcut so it can pick a threshold).
 			task.setHasRequiredObject(obj.has("required_object") || obj.has("required_finished_object"));
+
+			// Progress, as ChunkBlazer and ChunkBlazer UI pass a task between them (never in the catalog).
+			if (obj.has("currentProgress") && obj.get("currentProgress").isJsonPrimitive())
+			{
+				task.setCurrentProgress(obj.get("currentProgress").getAsInt());
+			}
+			if (obj.has("targetQuantity") && obj.get("targetQuantity").isJsonPrimitive())
+			{
+				task.setTargetQuantity(obj.get("targetQuantity").getAsInt());
+			}
+			if (obj.has("completed") && obj.get("completed").isJsonPrimitive())
+			{
+				task.setCompleted(obj.get("completed").getAsBoolean());
+			}
 
 			return task;
 		}

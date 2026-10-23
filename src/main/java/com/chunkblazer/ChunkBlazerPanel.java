@@ -46,7 +46,6 @@ import javax.swing.JRadioButton;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
-import lombok.extern.slf4j.Slf4j;
 import com.chunkblazer.ui.WrappingTextLabel;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
@@ -56,7 +55,6 @@ import net.runelite.client.util.LinkBrowser;
 
 
 
-@Slf4j
 public class ChunkBlazerPanel extends PluginPanel
 {
 	private static final int PANEL_WIDTH = 225; // Standard RuneLite panel width
@@ -72,6 +70,8 @@ public class ChunkBlazerPanel extends PluginPanel
 
 	private JPanel modeSelectionPanel;
 	private JPanel overlayHint;
+	// Search, filters and the task list, under the framed box (which keeps the hint and stats).
+	private JPanel taskArea;
 	private JPanel loggedOutPanel;
 	// Data-sync header: the "Progress synced" notice (sync ON) or the first-run
 	// "Enable Sync" prompt (sync OFF, the default), toggled in updatePanel.
@@ -89,12 +89,14 @@ public class ChunkBlazerPanel extends PluginPanel
 
 	// Verification banner, shown until the account is verified via the in-game chat handshake.
 	private JPanel verificationPanel;
+	// On Tutorial Island, in place of the account setup: that waits for the mainland.
+	private JPanel tutorialPanel;
 	private JLabel verificationCodeLabel;
 
 
 
-	/** Give the panel the game's look (PanelStyle); called once its task list is in. */
-	public void setOldSchool()
+	/** Give the panel the current theme's look (PanelStyle); called once its task list is in, and on a theme change. */
+	public void applyTheme()
 	{
 		SwingUtilities.invokeLater(() ->
 		{
@@ -108,7 +110,8 @@ public class ChunkBlazerPanel extends PluginPanel
 	protected void paintComponent(java.awt.Graphics g)
 	{
 		java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
-		g2.setPaint(Skin.stone(false));
+		ThemePalette p = Skin.palette();
+		g2.setPaint(p.theme == Theme.OLD_SCHOOL || p.tile != null ? Skin.stone(false) : p.panelBg);
 		g2.fillRect(0, 0, getWidth(), getHeight());
 		g2.dispose();
 	}
@@ -136,6 +139,16 @@ public class ChunkBlazerPanel extends PluginPanel
 		header.setAlignmentX(LEFT_ALIGNMENT);
 		mainPanel.add(header);
 		mainPanel.add(Box.createVerticalStrut(4));
+		tutorialPanel = boxPanel(ColorScheme.DARKER_GRAY_COLOR);
+		tutorialPanel.setAlignmentX(LEFT_ALIGNMENT);
+		frame(tutorialPanel, FLAME, 5, 6);
+		tutorialPanel.add(note("ChunkBlazer tutorial", FLAME));
+		tutorialPanel.add(note("You're on Tutorial Island: follow the tutorial in game, with practice chunks "
+			+ "and tasks worth 0 points.", Color.WHITE));
+		tutorialPanel.add(note("Server Sync and your game mode are set up once you reach Lumbridge, "
+			+ "where you can type in chat.", Color.LIGHT_GRAY));
+		tutorialPanel.setVisible(false);
+		mainPanel.add(tutorialPanel);
 		dataNoticeRow = createDataNoticeRow();
 		mainPanel.add(dataNoticeRow);
 		syncPromptPanel = createSyncPromptSection();
@@ -165,6 +178,10 @@ public class ChunkBlazerPanel extends PluginPanel
 			+ "click a quest for its requirements, click a heading to fold it.", SMALL, FLAME, CONTENT_WIDTH - 16));
 		overlayHint.setVisible(false);
 		mainPanel.add(overlayHint);
+		taskArea = boxPanel(ColorScheme.DARK_GRAY_COLOR);
+		taskArea.setAlignmentX(LEFT_ALIGNMENT);
+		taskArea.setVisible(false);
+		mainPanel.add(taskArea);
 		mainPanel.add(Box.createVerticalStrut(8));
 
 		historyButton = linkButton("View my task history", new Color(140, 140, 140),
@@ -598,12 +615,26 @@ public class ChunkBlazerPanel extends PluginPanel
 		}
 	}
 
+	// The header box's top row: the title, and at its right whatever setHeaderTool puts there.
+	private JPanel titleRow;
+
+	/** Put a small control (the task list's card details gear) at the top right of the header box. */
+	public void setHeaderTool(JComponent tool)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			titleRow.add(tool, BorderLayout.EAST);
+			titleRow.revalidate();
+			titleRow.repaint();
+		});
+	}
+
 	private JPanel createHeaderSection()
 	{
 		JPanel headerPanel = boxPanel(ColorScheme.DARKER_GRAY_COLOR);
 		frame(headerPanel, ColorScheme.MEDIUM_GRAY_COLOR, 3, 6);
 
-		JPanel titleRow = styledPanel(new BorderLayout(3, 0), ColorScheme.DARKER_GRAY_COLOR);
+		titleRow = styledPanel(new BorderLayout(3, 0), ColorScheme.DARKER_GRAY_COLOR);
 		titleRow.setAlignmentX(CENTER_ALIGNMENT);
 		titleRow.setMaximumSize(new Dimension(CONTENT_WIDTH, 20));
 
@@ -770,7 +801,9 @@ public class ChunkBlazerPanel extends PluginPanel
 			loggedOutPanel.setVisible(!loggedIn);
 
 			boolean syncOn = plugin.isServerSyncEnabled();
-			syncPromptPanel.setVisible(!syncOn);
+			// Not on Tutorial Island: it's set up on reaching Lumbridge, and here it pushed the
+			// tutorial's practice tasks down out of sight.
+			syncPromptPanel.setVisible(!syncOn && !plugin.isOnTutorialIsland());
 			boolean choosing = !syncOn && !plugin.isPlayOffline();
 			syncChoiceHint.setVisible(choosing);
 			playOfflineButton.setVisible(choosing);
@@ -783,6 +816,7 @@ public class ChunkBlazerPanel extends PluginPanel
 			{
 				modeSelectionPanel.setVisible(false);
 				overlayHint.setVisible(false);
+				taskArea.setVisible(false);
 				revalidate();
 				repaint();
 				return;
@@ -793,13 +827,25 @@ public class ChunkBlazerPanel extends PluginPanel
 	}
 
 
-	/** The task list (from TaskBrowserOverlay), shown under the hint once a mode is picked. */
+	/** The task list (TaskSidePanel), shown under the hint once a mode is picked. */
+	/** Add to the framed box under the hint (the points, chunks, tasks and tokens). */
+	public void addTaskStats(JComponent stats)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			stats.setAlignmentX(LEFT_ALIGNMENT);
+			overlayHint.add(stats);
+			revalidate();
+		});
+	}
+
+	/** Add below the framed box, the panel's full width (search, filters, the task list). */
 	public void addTaskList(JComponent list)
 	{
 		SwingUtilities.invokeLater(() ->
 		{
 			list.setAlignmentX(LEFT_ALIGNMENT);
-			overlayHint.add(list);
+			taskArea.add(list);
 			revalidate();
 		});
 	}
@@ -812,8 +858,22 @@ public class ChunkBlazerPanel extends PluginPanel
 			return;
 		}
 		boolean isLocked = plugin.isModeLocked();
-		modeSelectionPanel.setVisible(!isLocked);
-		overlayHint.setVisible(isLocked);
+		// On Tutorial Island the tutorial runs the show: its practice tasks, and the mode
+		// is picked once you reach the mainland.
+		boolean island = plugin.isOnTutorialIsland();
+		modeSelectionPanel.setVisible(!isLocked && !island);
+		tutorialPanel.setVisible(island);
+		if (island)
+		{
+			// Sync, verification and the account links all need the mainland's chat box.
+			for (JComponent c : new JComponent[]{syncPromptPanel, dataNoticeRow, verificationPanel, historyButton,
+				showKeyButton, resetAccountButton})
+			{
+				c.setVisible(false);
+			}
+		}
+		overlayHint.setVisible(isLocked || island || plugin.isTutorialPreview());
+		taskArea.setVisible(overlayHint.isVisible());
 		// Until a mode is picked the panel is only the mode picker, so no chunk either.
 		regionLabel.setVisible(isLocked);
 
@@ -824,6 +884,11 @@ public class ChunkBlazerPanel extends PluginPanel
 				new Color(255, 100, 100) : new Color(100, 200, 100);
 			modeLabel.setText(" | " + mode.getName());
 			modeLabel.setForeground(modeColor);
+		}
+		else if (island)
+		{
+			modeLabel.setText("Tutorial: pick a mode in Lumbridge");
+			modeLabel.setForeground(Color.ORANGE);
 		}
 		else
 		{

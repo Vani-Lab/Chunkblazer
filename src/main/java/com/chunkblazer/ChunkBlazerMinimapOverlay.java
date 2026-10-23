@@ -39,7 +39,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import javax.inject.Inject;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Constants;
 import net.runelite.api.Perspective;
@@ -61,7 +60,6 @@ import net.runelite.client.ui.overlay.OverlayPriority;
  * so the grid rotates and scales with the minimap; the hover/right-click logic below
  * uses a coarser approximation that only needs to know which neighbour is under the cursor.
  */
-@Slf4j
 public class ChunkBlazerMinimapOverlay extends Overlay
 {
 	private static final int REGION_SIZE = 64; // 64 tiles per region

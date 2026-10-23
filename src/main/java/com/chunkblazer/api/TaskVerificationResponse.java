@@ -94,18 +94,4 @@ public class TaskVerificationResponse
 			.serverTimestamp(System.currentTimeMillis())
 			.build();
 	}
-
-	/**
-	 * Create a task completed response.
-	 */
-	public static TaskVerificationResponse completed(String taskId, int points)
-	{
-		return TaskVerificationResponse.builder()
-			.success(true)
-			.taskCompleted(true)
-			.pointsAwarded(points)
-			.serverTaskId(taskId)
-			.serverTimestamp(System.currentTimeMillis())
-			.build();
-	}
 }

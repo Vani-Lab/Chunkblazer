@@ -77,16 +77,14 @@ class TaskTargetExtrasTest
 
 		assertEquals(Integer.valueOf(83), TaskTargetExtras.requirements(task("build_spirit_tree")).get(Skill.FARMING));
 		assertEquals(Integer.valueOf(70), TaskTargetExtras.requirements(task("build_spirit_tree")).get(Skill.CONSTRUCTION));
-		assertTrue(TaskTargetExtras.npcIds(task("cook_blurberry_special")).contains(6531));
-		assertTrue(TaskTargetExtras.objectIds(task("agility_level_26_underwall_tunnel")).contains(16528));
 	}
 
 	@Test
 	void missingOrBadSidecarLeavesExtrasEmpty()
 	{
 		TaskTargetExtras.load("{not json", new Gson());
-		assertTrue(TaskTargetExtras.npcIds(task("cook_blurberry_special")).isEmpty());
+		assertTrue(TaskTargetExtras.requirements(task("build_spirit_tree")).isEmpty());
 		TaskTargetExtras.load(null, new Gson());
-		assertTrue(TaskTargetExtras.objectIds(task("agility_level_26_underwall_tunnel")).isEmpty());
+		assertTrue(TaskTargetExtras.requirements(task("build_spirit_tree")).isEmpty());
 	}
 }

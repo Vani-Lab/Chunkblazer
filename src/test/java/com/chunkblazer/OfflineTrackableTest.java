@@ -42,24 +42,24 @@ class OfflineTrackableTest
 	@Test
 	void savedStateTasksWorkOffline()
 	{
-		assertTrue(TaskBrowserOverlay.isOfflineTrackable(task("QUEST_CHECK", "Quest")));
-		assertTrue(TaskBrowserOverlay.isOfflineTrackable(task("SKILL_THRESHOLD", "Progression")));
-		assertTrue(TaskBrowserOverlay.isOfflineTrackable(task("COMBAT_ACHIEVEMENT", "Combat")));
-		assertTrue(TaskBrowserOverlay.isOfflineTrackable(task("VARBIT_CHECK", "Unlock")));
+		assertTrue(TaskLists.isOfflineTrackable(task("QUEST_CHECK", "Quest")));
+		assertTrue(TaskLists.isOfflineTrackable(task("SKILL_THRESHOLD", "Progression")));
+		assertTrue(TaskLists.isOfflineTrackable(task("COMBAT_ACHIEVEMENT", "Combat")));
+		assertTrue(TaskLists.isOfflineTrackable(task("VARBIT_CHECK", "Unlock")));
 		// Counts if it's still worn when you log in on RuneLite.
-		assertTrue(TaskBrowserOverlay.isOfflineTrackable(task("EQUIP", "Combat")));
+		assertTrue(TaskLists.isOfflineTrackable(task("EQUIP", "Combat")));
 		// Plain obtain tasks count what you hold (inventory + bank + worn), pets included.
-		assertTrue(TaskBrowserOverlay.isOfflineTrackable(task("OBTAIN", "Obtain")));
+		assertTrue(TaskLists.isOfflineTrackable(task("OBTAIN", "Obtain")));
 	}
 
 	@Test
 	void liveEventTasksDoNot()
 	{
-		assertFalse(TaskBrowserOverlay.isOfflineTrackable(task("MINING", "Mining")));
-		assertFalse(TaskBrowserOverlay.isOfflineTrackable(task("NPC_Kill", "Combat")));
+		assertFalse(TaskLists.isOfflineTrackable(task("MINING", "Mining")));
+		assertFalse(TaskLists.isOfflineTrackable(task("NPC_Kill", "Combat")));
 		// Skilling: an item only counts if it arrives with a matching XP drop, live.
-		assertFalse(TaskBrowserOverlay.isOfflineTrackable(task("FISHING", "Fishing")));
+		assertFalse(TaskLists.isOfflineTrackable(task("FISHING", "Fishing")));
 		// Activating a prayer is momentary: the varbit has reset by the next login.
-		assertFalse(TaskBrowserOverlay.isOfflineTrackable(task("VARBIT_CHECK", "Prayer")));
+		assertFalse(TaskLists.isOfflineTrackable(task("VARBIT_CHECK", "Prayer")));
 	}
 }

@@ -290,12 +290,6 @@ public class CatalogStore
 		}
 	}
 
-	/** True once a non-empty catalog has been loaded from cache, seed, or network. */
-	public boolean isLoaded()
-	{
-		return loaded;
-	}
-
 	/** The JSON content for a catalog file (e.g. {@code "Misthalin_Tasks.json"}), or null. */
 	public String getFileContent(String filename)
 	{

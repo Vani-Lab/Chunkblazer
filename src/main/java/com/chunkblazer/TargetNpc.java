@@ -209,6 +209,11 @@ public class TargetNpc
 				npc.setQuantityRange(range);
 			}
 
+			// Passed between ChunkBlazer and ChunkBlazer UI with this session's roll (never in the catalog).
+			if (obj.has("rolledQuantity") && obj.get("rolledQuantity").isJsonPrimitive())
+			{
+				npc.rolledQuantity = obj.get("rolledQuantity").getAsInt();
+			}
 			return npc;
 		}
 	}

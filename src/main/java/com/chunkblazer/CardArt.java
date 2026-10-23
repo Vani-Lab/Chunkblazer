@@ -42,7 +42,7 @@ import net.runelite.client.util.ImageUtil;
  * {@code back_<tier>.png}, 356 x 200, the tier already painted on the title plate), with the
  * task written on the face's grey panel.
  */
-final class CardArt
+public final class CardArt
 {
 	private static final BufferedImage[] FRONT = new BufferedImage[5];
 	private static final BufferedImage[] BACK = new BufferedImage[5];
@@ -62,11 +62,10 @@ final class CardArt
 	}
 
 	/**
-	 * Draw one card in {@code b}: its back, or its face with the task's name, quantity and
-	 * description centred on the grey panel. The panel was measured off the art: x 44 to 312,
-	 * y 90 to 180, the same on every tier.
+	 * Draw one card in {@code b} in btwinnn's art: its back, or its face with just the task's
+	 * name. (ChunkBlazer UI's themes draw their own: CardFace.)
 	 */
-	static void paint(Graphics2D g, Rectangle b, TaskCardTier tier, boolean front, String name, String description, int quantity)
+	public static void paint(Graphics2D g, Rectangle b, TaskCardTier tier, boolean front, String name)
 	{
 		g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 		g.drawImage((front ? FRONT : BACK)[tier.ordinal()], b.x, b.y, b.width, b.height, null);
@@ -74,34 +73,17 @@ final class CardArt
 		{
 			return;
 		}
-		g.setFont(FontManager.getRunescapeSmallFont());
+		// Just the task's name, centred on the grey panel (x 44 to 312, y 90 to 180 of 356 x 200).
+		g.setFont(FontManager.getRunescapeBoldFont());
 		g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
 		FontMetrics fm = g.getFontMetrics();
-		int width = Math.round(b.width * 0.72f);
-		int room = Math.round(b.height * 0.45f) / fm.getHeight();
-		boolean hasDescription = description != null && !description.trim().isEmpty();
-		int count = quantity > 1 ? 1 : 0;
-		// The name comes first; the description (after a blank line) gets what's left.
-		List<String> names = wrap(fm, name, width, Math.max(1, room - count - (hasDescription ? 2 : 0)));
-		List<String> notes = hasDescription ? wrap(fm, description.trim(), width, room - names.size() - count - 1)
-			: new ArrayList<>();
-		int lines = names.size() + count + (notes.isEmpty() ? 0 : notes.size() + 1);
+		int width = Math.round(b.width * 0.7f);
+		List<String> names = wrap(fm, name, width, 3);
 		int cx = b.x + b.width / 2;
-		int y = b.y + Math.round(b.height * 0.675f) - lines * fm.getHeight() / 2 + fm.getAscent();
+		int y = b.y + Math.round(b.height * 0.675f) - names.size() * fm.getHeight() / 2 + fm.getAscent();
 		for (String line : names)
 		{
 			Skin.centred(g, line, cx, y, Color.WHITE);
-			y += fm.getHeight();
-		}
-		if (count > 0)
-		{
-			Skin.centred(g, "Quantity: " + quantity, cx, y, new Color(255, 200, 60));
-			y += fm.getHeight();
-		}
-		y += fm.getHeight();
-		for (String line : notes)
-		{
-			Skin.centred(g, line, cx, y, new Color(205, 205, 205));
 			y += fm.getHeight();
 		}
 	}

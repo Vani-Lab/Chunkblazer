@@ -26,53 +26,36 @@
 
 package com.chunkblazer;
 
-import java.awt.event.MouseEvent;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import net.runelite.client.input.MouseAdapter;
+import net.runelite.client.callback.ClientThread;
+import net.runelite.client.game.chatbox.ChatboxPanelManager;
+import net.runelite.client.util.LinkBrowser;
 
 /**
- * Makes the X, the archive book and the compact/detailed switch on the Selected Task box clickable. Overlays can't
- * take clicks by themselves, so this listens to the game canvas (like TaskCardInput
- * does for the task cards) and swallows a click on either button so it doesn't also
- * walk the player. The overlay works out what's hovered while drawing, so no
- * coordinate maths happens here.
+ * The Points orb's "Tasks" without ChunkBlazer UI: a chatbox prompt offering its Plugin Hub
+ * page (plugins can't install other plugins, so the player clicks Install there).
  */
 @Singleton
-public class SelectedTaskOverlayInput extends MouseAdapter
+public class UiInstallPrompt
 {
-	private final SelectedTaskOverlay overlay;
-	private final ChunkBlazerPlugin plugin;
+	/** ChunkBlazer UI's Plugin Hub page. */
+	static final String HUB_PAGE = "https://runelite.net/plugin-hub/show/chunkblazer-ui";
 
 	@Inject
-	private SelectedTaskOverlayInput(SelectedTaskOverlay overlay, ChunkBlazerPlugin plugin)
-	{
-		this.overlay = overlay;
-		this.plugin = plugin;
-	}
+	private ChatboxPanelManager chatboxPanelManager;
+	@Inject
+	private ClientThread clientThread;
 
-	@Override
-	public MouseEvent mousePressed(MouseEvent event)
+	/** Any thread. */
+	public void show()
 	{
-		if (event.getButton() != MouseEvent.BUTTON1)
-		{
-			return event;
-		}
-		if (overlay.isCloseHovered())
-		{
-			plugin.clearSelectedTask();
-			event.consume();
-		}
-		else if (overlay.isArchiveHovered())
-		{
-			overlay.archiveShownTask();
-			event.consume();
-		}
-		else if (overlay.isModeHovered())
-		{
-			overlay.toggleMode();
-			event.consume();
-		}
-		return event;
+		// The title is one line of the chatbox: kept short so it isn't cut off at the sides.
+		clientThread.invokeLater(() -> chatboxPanelManager.openTextMenuInput("The task window needs ChunkBlazer UI")
+			.option("Open its Plugin Hub page", () -> LinkBrowser.browse(HUB_PAGE))
+			.option("Not now", () ->
+			{
+			})
+			.build());
 	}
 }

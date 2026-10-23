@@ -35,7 +35,6 @@ import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,16 +66,9 @@ import net.runelite.api.gameval.VarPlayerID;
  */
 @Slf4j
 @Singleton
-class QuestRequirements
+public class QuestRequirements
 {
 	private static final String RESOURCE = "quest_requirements.json";
-	static final Color MET = new Color(110, 210, 110);
-	static final Color NOT_MET = new Color(255, 90, 90);
-	// A locked chunk next to one you own (or a charter/free chunk): it can be unlocked now.
-	static final Color NEXT_TO_YOURS = new Color(255, 200, 60);
-	static final Color COST = new Color(255, 170, 60);
-	static final Color UNSURE = new Color(150, 145, 135);
-	static final Color TEXT = new Color(200, 195, 180);
 
 	/** One quest's needs, as stored in quest_requirements.json. */
 	static final class Need
@@ -89,36 +81,34 @@ class QuestRequirements
 		Integer combat;
 	}
 
-	/** Space above each section header, in pixels. */
-	static final int SECTION_GAP = 5;
-	/** How far items sit in from their section header, in pixels. */
-	static final int ITEM_INDENT = 14;
-
 	/**
 	 * One line under an expanded task: plain text, a section header (click to open or
 	 * close it), or an item inside a section. A chunk item carries its region (click to
 	 * see it on the map); a quest item carries the quest's name (click to jump to it).
 	 */
-	static final class Line
+	public static final class Line
 	{
-		final String text;
-		final Color color;
-		final int region;
-		final String quest;
-		final String toggle;
-		final boolean header;
-		final boolean open;
-		final int indent;
-		final int gap;
+		public final String text;
+		public final Color color;
+		public final int region;
+		public final String quest;
+		public final String toggle;
+		public final boolean header;
+		public final boolean open;
+		public final int indent;
+		public final int gap;
+		/** An OSRS Wiki page this line opens when clicked (an Obtain or Equip task's item), or null. */
+		public final String wiki;
 
-		Line(String text, Color color)
+		public Line(String text, Color color)
 		{
-			this(text, color, -1, null, null, false, false, 0, 0);
+			this(text, color, -1, null, null, false, false, 0, 0, null);
 		}
 
 		private Line(String text, Color color, int region, String quest, String toggle, boolean header, boolean open,
-			int indent, int gap)
+			int indent, int gap, String wiki)
 		{
+			this.wiki = wiki;
 			this.text = text;
 			this.color = color;
 			this.region = region;
@@ -128,33 +118,6 @@ class QuestRequirements
 			this.open = open;
 			this.indent = indent;
 			this.gap = gap;
-		}
-
-		static Line header(String text, Color color, String toggle, boolean open)
-		{
-			return new Line(text, color, -1, null, toggle, true, open, 0, SECTION_GAP);
-		}
-
-		static Line item(String text, Color color, int region, String quest)
-		{
-			return new Line(text, color, region, quest, null, false, false, ITEM_INDENT, 0);
-		}
-
-		/** Plain text with space above it, like the cost line. */
-		static Line spaced(String text, Color color)
-		{
-			return new Line(text, color, -1, null, null, false, false, 0, SECTION_GAP);
-		}
-
-		/** The same line with other text, for wrapping. Only the first part keeps the space above. */
-		Line withText(String newText, boolean first)
-		{
-			return new Line(newText, color, region, quest, toggle, header, open, indent, first ? gap : 0);
-		}
-
-		boolean clickable()
-		{
-			return region > 0 || quest != null || toggle != null;
 		}
 	}
 
@@ -167,9 +130,6 @@ class QuestRequirements
 	private final Map<Quest, QuestState> states = new ConcurrentHashMap<>();
 	private List<Quest> watched = Collections.emptyList();
 	private int nextToCheck;
-	// Sections the player opened or closed ("taskId:chunks" -> open). Unset ones are closed.
-	private final Map<String, Boolean> sectionOpen = new ConcurrentHashMap<>();
-	private final Map<String, Boolean> sectionDefault = new ConcurrentHashMap<>();
 
 	@Inject
 	QuestRequirements(Client client, ChunkBlazerPlugin plugin, Gson gson)
@@ -180,7 +140,7 @@ class QuestRequirements
 	}
 
 	/** Reads quest_requirements.json. Missing or broken data just means no quest info. */
-	void load()
+	public void load()
 	{
 		try (InputStream in = QuestRequirements.class.getResourceAsStream(RESOURCE))
 		{
@@ -224,7 +184,7 @@ class QuestRequirements
 	}
 
 	/** Forget quest states, e.g. after logging out (the next account may differ). */
-	void reset()
+	public void reset()
 	{
 		states.clear();
 		nextToCheck = 0;
@@ -234,7 +194,7 @@ class QuestRequirements
 	 * Checks the state of up to {@code budget} prerequisite quests, taking turns so the
 	 * whole list is covered every few ticks. Client thread, logged in only.
 	 */
-	void refreshStates(int budget)
+	public void refreshStates(int budget)
 	{
 		List<Quest> list = watched;
 		for (int i = 0; i < budget && !list.isEmpty(); i++)
@@ -257,7 +217,7 @@ class QuestRequirements
 	 * a Black Candle: QUEST_CHECK, but category Combat/Obtain); those are normal tasks, tracked
 	 * and listed like any other, not quests.
 	 */
-	static boolean isQuestTask(NuzlockeTask task)
+	public static boolean isQuestTask(NuzlockeTask task)
 	{
 		return task != null && "QUEST_CHECK".equalsIgnoreCase(task.getCompletionType())
 			&& ("Quest".equalsIgnoreCase(task.getCategory())
@@ -279,7 +239,7 @@ class QuestRequirements
 	 * True if every chunk, level, prerequisite quest and point total is met. Tasks that
 	 * aren't quests always pass; a quest with no data never does, since we can't tell.
 	 */
-	boolean isReady(NuzlockeTask task)
+	public boolean isReady(NuzlockeTask task)
 	{
 		if (!isQuestTask(task))
 		{
@@ -329,175 +289,6 @@ class QuestRequirements
 		return need.combat == null || combatLevel() >= need.combat;
 	}
 
-	/** Open or close one section of a quest's requirement list. */
-	void toggleSection(String key)
-	{
-		sectionOpen.put(key, !sectionOpen.getOrDefault(key, sectionDefault.getOrDefault(key, false)));
-	}
-
-	private boolean isOpen(String key, boolean openByDefault)
-	{
-		sectionDefault.put(key, openByDefault);
-		return sectionOpen.getOrDefault(key, openByDefault);
-	}
-
-	/**
-	 * What's shown under an expanded quest: ready or not, then one section each for
-	 * chunks, earlier quests' chunks, skills and quests, then points and the unlock cost.
-	 * Every section starts closed; its header's count (red until complete) shows how it
-	 * stands. Opened, it lists what's missing first (red, or yellow for a chunk next to
-	 * yours), then what you have (green).
-	 */
-	List<Line> lines(NuzlockeTask task, IntFunction<String> chunkName)
-	{
-		List<Line> lines = new ArrayList<>();
-		if (!isQuestTask(task))
-		{
-			return lines;
-		}
-		Need need = needFor(task);
-		if (need == null)
-		{
-			lines.add(new Line("No requirement data for this quest yet", UNSURE));
-			return lines;
-		}
-		String id = task.getTaskId();
-		lines.add(isReady(task) ? new Line("Ready to start", MET) : new Line("Not ready yet", NOT_MET));
-		Set<Integer> toUnlock = new LinkedHashSet<>();
-
-		// Chunks the quest's own steps are in.
-		Map<String, Integer> own = chunks(need.chunks, chunkName);
-		if (!own.isEmpty())
-		{
-			List<Line> missing = new ArrayList<>();
-			List<Line> have = new ArrayList<>();
-			for (Map.Entry<String, Integer> e : own.entrySet())
-			{
-				boolean ok = reachable(e.getValue());
-				(ok ? have : missing).add(Line.item(e.getKey(), chunkColor(e.getValue()), e.getValue(), null));
-				if (!ok)
-				{
-					toUnlock.add(e.getValue());
-				}
-			}
-			addSection(lines, id + ":chunks", "Chunks", have.size(), own.size(), missing, have);
-		}
-
-		// Locked chunks needed by quests that must be finished first. Closed to start with.
-		Map<String, Integer> earlier = new LinkedHashMap<>();
-		collectEarlierChunks(need, new HashSet<>(), own, earlier, chunkName);
-		if (!earlier.isEmpty())
-		{
-			toUnlock.addAll(earlier.values());
-			String key = id + ":earlier";
-			boolean open = isOpen(key, false);
-			lines.add(Line.header("Chunks for earlier quests (" + earlier.size() + ")", NOT_MET, key, open));
-			if (open)
-			{
-				for (Map.Entry<String, Integer> e : earlier.entrySet())
-				{
-					lines.add(Line.item(e.getKey(), chunkColor(e.getValue()), e.getValue(), null));
-				}
-			}
-		}
-
-		if (need.skills != null && !need.skills.isEmpty())
-		{
-			List<Line> missing = new ArrayList<>();
-			List<Line> have = new ArrayList<>();
-			for (Map.Entry<String, Integer> e : need.skills.entrySet())
-			{
-				Skill skill = skill(e.getKey());
-				if (skill == null)
-				{
-					continue;
-				}
-				int level = client.getRealSkillLevel(skill);
-				if (level >= e.getValue())
-				{
-					have.add(Line.item(e.getValue() + " " + skill.getName(), MET, -1, null));
-				}
-				else
-				{
-					missing.add(Line.item(e.getValue() + " " + skill.getName() + " (you: " + level + ")", NOT_MET, -1, null));
-				}
-			}
-			addSection(lines, id + ":skills", "Skills", have.size(), have.size() + missing.size(), missing, have);
-		}
-
-		if (need.quests != null && !need.quests.isEmpty())
-		{
-			List<Line> missing = new ArrayList<>();
-			List<Line> have = new ArrayList<>();
-			for (String name : need.quests)
-			{
-				Quest quest = quest(name);
-				if (quest == null)
-				{
-					continue;
-				}
-				QuestState state = states.get(quest);
-				if (state == QuestState.FINISHED)
-				{
-					have.add(Line.item(quest.getName(), MET, -1, name));
-				}
-				else
-				{
-					missing.add(Line.item(quest.getName() + (state == null ? " (checking)" : ""),
-						state == null ? UNSURE : NOT_MET, -1, name));
-				}
-			}
-			addSection(lines, id + ":quests", "Quests", have.size(), have.size() + missing.size(), missing, have);
-		}
-
-		if (need.questPoints != null)
-		{
-			int have = questPoints();
-			lines.add(Line.spaced("Quest points " + Math.min(have, need.questPoints) + "/" + need.questPoints,
-				have >= need.questPoints ? MET : NOT_MET));
-		}
-		if (need.combat != null)
-		{
-			int have = combatLevel();
-			lines.add(Line.spaced("Combat level " + need.combat + " (you: " + have + ")",
-				have >= need.combat ? MET : NOT_MET));
-		}
-
-		Line cost = costLine(toUnlock);
-		if (cost != null)
-		{
-			lines.add(cost);
-		}
-		if (need.chunks != null && !need.chunks.isEmpty())
-		{
-			lines.add(Line.spaced("Chunks are from Quest Helper: an estimate of the essential ones.", UNSURE));
-		}
-		return lines;
-	}
-
-	/** A section header ("Skills 1/2", green when complete) and, if open, its items. */
-	private void addSection(List<Line> lines, String key, String label, int have, int total,
-		List<Line> missing, List<Line> met)
-	{
-		if (total == 0)
-		{
-			return;
-		}
-		boolean open = isOpen(key, false);
-		lines.add(Line.header(label + " " + have + "/" + total, have >= total ? MET : NOT_MET, key, open));
-		if (open)
-		{
-			lines.addAll(missing);
-			lines.addAll(met);
-		}
-	}
-
-	/** Green if you have it, yellow if it's next to yours (unlockable now), red if not. */
-	private Color chunkColor(int region)
-	{
-		return reachable(region) ? MET : plugin.isUnlockableRegion(region) ? NEXT_TO_YOURS : NOT_MET;
-	}
-
 	/** Chunk name to its first listed region, one entry per chunk (multi-region chunks share a name). */
 	private static Map<String, Integer> chunks(List<Integer> regions, IntFunction<String> chunkName)
 	{
@@ -541,54 +332,10 @@ class QuestRequirements
 	}
 
 	/**
-	 * "Unlock cost: 14 points for 6 chunks": points for the paid ones at your current
-	 * price, plus boss tokens. Free chunks cost nothing, so aren't mentioned; null when
-	 * there's nothing to pay.
-	 */
-	private Line costLine(Set<Integer> regions)
-	{
-		if (regions.isEmpty())
-		{
-			return null;
-		}
-		int paid = 0;
-		int boss = 0;
-		for (int region : regions)
-		{
-			if (plugin.isBossRegion(region))
-			{
-				boss++;
-			}
-			else if (plugin.getRegionUnlockCost(region) != 0)
-			{
-				paid++;
-			}
-		}
-		// Each paid unlock raises the price of the next, so add them up from your current rank.
-		if (paid == 0 && boss == 0)
-		{
-			return null;
-		}
-		int rank = plugin.countPayableUnlockedChunks();
-		int points = 0;
-		for (int k = 1; k <= paid; k++)
-		{
-			points += ChunkBlazerPlugin.curveUnlockCost(rank + k);
-		}
-		StringBuilder text = new StringBuilder("Unlock cost: ").append(points).append(points == 1 ? " pt" : " pts")
-			.append(" (").append(paid).append(paid == 1 ? " chunk)" : " chunks)");
-		if (boss > 0)
-		{
-			text.append(", ").append(boss).append(boss == 1 ? " boss token" : " boss tokens");
-		}
-		return Line.spaced(text.toString(), COST);
-	}
-
-	/**
 	 * Unlocked, or not a lockable chunk at all (dungeons, and the odd region that isn't
 	 * part of the chunk grid), so it never holds a quest back.
 	 */
-	private boolean reachable(int region)
+	public boolean reachable(int region)
 	{
 		return !plugin.isKnownRegion(region) || plugin.isRegionUnlocked(region);
 	}

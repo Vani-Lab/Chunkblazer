@@ -57,7 +57,7 @@ public class TaskCompletionAnimationOverlay extends Overlay
 	private static final long BAR = 1000;
 	private static final long OPEN = 2500;
 	private static final long HOLD_END = 6500;
-	private static final long TOTAL = 9000;
+	public static final long TOTAL = 9000;
 	private static final Font NAME_FONT = new Font("Verdana", Font.BOLD, 11);
 	private static final Font VALUE_FONT = new Font("Verdana", Font.PLAIN, 10);
 	private static final Color SHADOW = new Color(0, 0, 0, 180);
@@ -121,15 +121,17 @@ public class TaskCompletionAnimationOverlay extends Overlay
 		}
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 		g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-		int cx = client.getCanvasWidth() / 2;
-		int y = client.getCanvasHeight() / 8;
+		// Over the game view: in the fixed-size client that's the game window near its top
+		// (the title box rises above this line), not the middle of the whole client.
+		int cx = client.getViewportXOffset() + client.getViewportWidth() / 2;
+		int y = client.isResized() ? client.getCanvasHeight() / 8 : client.getViewportYOffset() + TITLE_BOX.getHeight() + 6;
 		Shape clip = g.getClip();
 		if (t < BAR)
 		{
 			// The bar opens from the middle out.
 			int full = BAR_IMAGE.getWidth();
 			int w = (int) (full * ease(t / (float) BAR));
-			int x = (client.getCanvasWidth() - full) / 2;
+			int x = cx - full / 2;
 			g.clip(new Rectangle(x + (full - w) / 2, y, w, BAR_IMAGE.getHeight()));
 			g.drawImage(BAR_IMAGE, x, y, null);
 		}

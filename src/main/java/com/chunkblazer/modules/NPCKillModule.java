@@ -39,7 +39,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.Value;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.Hitsplat;
 import net.runelite.api.HitsplatID;
@@ -73,7 +72,6 @@ import com.chunkblazer.api.NpcKillReport;
  * Module for handling NPC_KILL completion type tasks.
  * Tracks NPC kills and verifies them with the server.
  */
-@Slf4j
 @Singleton
 public class NPCKillModule extends AbstractTaskModule
 {

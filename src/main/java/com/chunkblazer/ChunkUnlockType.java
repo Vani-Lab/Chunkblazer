@@ -33,7 +33,7 @@ import java.awt.Color;
  * if it can be unlocked, what it costs. The tint is kept light so the map stays
  * readable underneath; every unlockable chunk can also show its cost as text.
  */
-enum ChunkUnlockType
+public enum ChunkUnlockType
 {
 	// No tint: chunks you own show the plain map.
 	UNLOCKED("Unlocked", new Color(0, 255, 0), new Color(0, 0, 0, 0)),
@@ -43,9 +43,9 @@ enum ChunkUnlockType
 	BOSS("Boss chunk: 1 token", new Color(200, 110, 255), new Color(200, 110, 255, 60)),
 	LOCKED("Locked", new Color(255, 80, 80), new Color(0, 0, 0, 100));
 
-	final String legend;
+	public final String legend;
 	/** Solid colour for text (region id, cost label, legend). */
-	final Color color;
+	public final Color color;
 	/** Faint tint drawn over the whole chunk. */
 	final Color fill;
 
@@ -56,7 +56,7 @@ enum ChunkUnlockType
 		this.fill = fill;
 	}
 
-	boolean isUnlockable()
+	public boolean isUnlockable()
 	{
 		return this == PAID || this == FREE || this == CHARTER || this == BOSS;
 	}

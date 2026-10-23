@@ -26,17 +26,20 @@
 
 package com.chunkblazer;
 
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
 import java.awt.Paint;
 import java.awt.Polygon;
+import java.awt.Stroke;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.inject.Inject;
+import javax.inject.Provider;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
 import net.runelite.api.Constants;
@@ -44,6 +47,10 @@ import net.runelite.api.Perspective;
 import net.runelite.api.Player;
 import net.runelite.api.Point;
 import net.runelite.api.coords.LocalPoint;
+import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.PluginMessage;
+import net.runelite.client.plugins.Plugin;
+import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -62,6 +69,11 @@ import net.runelite.client.ui.overlay.OverlayPriority;
  * both directions until it's gone. If the unlock dealt reveal cards, the wall waits
  * until every card has been flipped and cleared off the screen, then opens.
  *
+ * Unlocking the chunk you're standing in radiates out from you instead: a ring of fire
+ * spreads across the ground from your feet to the chunk's edges, and each wall surges up
+ * as the ring reaches it. With ChunkBlazer GPU sweeping the chunk, the grey burns away from
+ * you there instead, so the ring is left to it.
+ *
  * The top edge always ripples like flames, and the wall flares up taller and brighter
  * as the player walks up to it.
  */
@@ -72,6 +84,10 @@ public class ChunkWallOverlay extends Overlay
 	private static final int LOCAL_TILE = Perspective.LOCAL_TILE_SIZE;
 	// Wall height in local units (128 per tile): about three tiles tall.
 	private static final int WALL_HEIGHT = 3 * LOCAL_TILE;
+	// The tutorial's fence round its start room, as a share of a full wall's height.
+	private static final double FENCE_SCALE = 0.3;
+	// Long enough for the fence's wave to cross the house and drop.
+	private static final long FENCE_DROP_MS = 3000;
 	// Only build walls within this many tiles of the player.
 	private static final int DRAW_DISTANCE = 40;
 
@@ -100,6 +116,8 @@ public class ChunkWallOverlay extends Overlay
 		long startedAt = -1;
 		int originX;
 		int originY;
+		// The player stood inside this chunk when it opened: the ring radiates from them.
+		boolean inside;
 
 		Opening(int regionId)
 		{
@@ -109,6 +127,22 @@ public class ChunkWallOverlay extends Overlay
 		boolean waiting()
 		{
 			return startedAt < 0;
+		}
+	}
+
+	// Chunks ChunkBlazer GPU has started its own unlock sweep on, and when. GPU sweeps at the
+	// unlock itself, these walls only once any task cards are flipped, so it counts for a minute.
+	private final Map<Integer, Long> gpuSweeps = new HashMap<>();
+
+	/** ChunkBlazer GPU says it's sweeping a chunk ("chunkblazer" / "unlockSweepStarted"). */
+	@Subscribe
+	public void onPluginMessage(PluginMessage message)
+	{
+		Object region = message.getData().get("regionId");
+		if ("chunkblazer".equals(message.getNamespace()) && "unlockSweepStarted".equals(message.getName())
+			&& region instanceof Integer)
+		{
+			gpuSweeps.put((Integer) region, System.currentTimeMillis());
 		}
 	}
 
@@ -125,13 +159,19 @@ public class ChunkWallOverlay extends Overlay
 	private final Client client;
 	private final ChunkBlazerPlugin plugin;
 	private final ChunkBlazerConfig config;
-	private final TaskCardOverlay cards;
+	// The task cards (ChunkBlazer UI's, or the plain ones): asked lazily, as ChunkBlazer UI uses this overlay.
+	private final Provider<ChunkBlazerUi> ui;
+	private final PluginManager pluginManager;
+	// Whether ChunkBlazer GPU is running, checked about once a second.
+	private boolean gpuOn;
+	private long gpuCheckedAt;
 
 	@Inject
 	public ChunkWallOverlay(Client client, ChunkBlazerPlugin plugin, ChunkBlazerConfig config,
-		TaskCardOverlay cards)
+		Provider<ChunkBlazerUi> ui, PluginManager pluginManager)
 	{
-		this.cards = cards;
+		this.ui = ui;
+		this.pluginManager = pluginManager;
 		this.client = client;
 		this.plugin = plugin;
 		this.config = config;
@@ -141,10 +181,32 @@ public class ChunkWallOverlay extends Overlay
 		setPriority(OverlayPriority.LOW);
 	}
 
+	/** True while the ChunkBlazer GPU plugin is turned on (checked about once a second). */
+	private boolean gpuRunning()
+	{
+		long now = System.currentTimeMillis();
+		if (now - gpuCheckedAt > 1000)
+		{
+			gpuCheckedAt = now;
+			boolean on = false;
+			for (Plugin p : pluginManager.getPlugins())
+			{
+				if (p.getClass().getSimpleName().equals("ChunkBlazerGpuPlugin") && pluginManager.isPluginActive(p))
+				{
+					on = true;
+					break;
+				}
+			}
+			gpuOn = on;
+		}
+		return gpuOn;
+	}
+
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.showChunkWalls() || client.isInInstancedRegion())
+		// ChunkBlazer GPU draws its own wall into the scene; this one is for when it's off.
+		if (!config.showChunkWalls() || client.isInInstancedRegion() || gpuRunning())
 		{
 			// Start fresh when walls come back, so nothing unlocked meanwhile replays.
 			lastSeen.clear();
@@ -158,7 +220,13 @@ public class ChunkWallOverlay extends Overlay
 			return null;
 		}
 
+		// The walls stand on the ground. Upstairs this flat overlay can't hide them behind
+		// the floor you're on, so they're left out there (ChunkBlazer GPU draws them below).
 		int plane = client.getPlane();
+		if (plane > 0)
+		{
+			return null;
+		}
 		baseX = client.getBaseX();
 		baseY = client.getBaseY();
 		playerX = baseX + playerPos.getX() / (double) LOCAL_TILE;
@@ -197,8 +265,136 @@ public class ChunkWallOverlay extends Overlay
 			}
 		}
 
+		int[] box = fence;
+		if (box != null)
+		{
+			drawFence(graphics, plane, base, box);
+		}
+
+		for (Opening opening : openings)
+		{
+			Long gpu = gpuSweeps.get(opening.regionId);
+			if (opening.inside && !opening.waiting() && (gpu == null || now - gpu > 60_000))
+			{
+				drawRing(graphics, plane, base, opening);
+			}
+		}
 		graphics.setPaint(previousPaint);
 		return null;
+	}
+
+	// A low wall round some tiles (world x1, y1, x2, y2), or null: the tutorial's start room.
+	private volatile int[] fence;
+
+	// When the fence started falling, and from where (world tiles); 0 while it stands.
+	private volatile long fenceDropAt;
+	private volatile double fenceDropX;
+	private volatile double fenceDropY;
+
+	public void setFence(int[] box)
+	{
+		fence = box;
+		fenceDropAt = 0;
+	}
+
+	/** The fence falls in a wave from (x, y), like a chunk's walls opening, then it's gone. */
+	public void dropFence(double x, double y)
+	{
+		fenceDropX = x;
+		fenceDropY = y;
+		fenceDropAt = System.currentTimeMillis();
+	}
+
+	/** The fence: a low flame wall along the outside of its tiles. */
+	private void drawFence(Graphics2D graphics, int plane, Color base, int[] box)
+	{
+		int x1 = box[0] - baseX;
+		int y1 = box[1] - baseY;
+		int x2 = box[2] + 1 - baseX;
+		int y2 = box[3] + 1 - baseY;
+		int last = Constants.SCENE_SIZE - 1;
+		if (x1 < 1 || y1 < 1 || x2 > last || y2 > last)
+		{
+			return;
+		}
+		if (fenceDropAt > 0 && now - fenceDropAt > FENCE_DROP_MS)
+		{
+			fence = null;
+			return;
+		}
+		for (int x = x1; x < x2; x++)
+		{
+			fencePanel(graphics, plane, base, x, y1, x + 1, y1);
+			fencePanel(graphics, plane, base, x, y2, x + 1, y2);
+		}
+		for (int y = y1; y < y2; y++)
+		{
+			fencePanel(graphics, plane, base, x1, y, x1, y + 1);
+			fencePanel(graphics, plane, base, x2, y, x2, y + 1);
+		}
+	}
+
+	/** One tile of the fence: standing, or surging and dropping as the wave passes it. */
+	private void fencePanel(Graphics2D graphics, int plane, Color base, int cx1, int cy1, int cx2, int cy2)
+	{
+		if (fenceDropAt == 0)
+		{
+			drawWall(graphics, plane, cx1, cy1, cx2, cy2, base, FENCE_SCALE, 0);
+			return;
+		}
+		double distance = Math.hypot(baseX + (cx1 + cx2) / 2.0 - fenceDropX, baseY + (cy1 + cy2) / 2.0 - fenceDropY);
+		double t = now - fenceDropAt - distance * WAVE_MS_PER_TILE;
+		if (t < 0)
+		{
+			drawWall(graphics, plane, cx1, cy1, cx2, cy2, base, FENCE_SCALE, 0);
+		}
+		else if (t < SURGE_MS)
+		{
+			double k = easeOut(t / SURGE_MS);
+			drawWall(graphics, plane, cx1, cy1, cx2, cy2, base, FENCE_SCALE * (1 + SURGE_HEIGHT * k), k);
+		}
+		else if (t < SURGE_MS + DROP_MS)
+		{
+			double k = easeIn((t - SURGE_MS) / DROP_MS);
+			drawWall(graphics, plane, cx1, cy1, cx2, cy2, base, FENCE_SCALE * (1 + SURGE_HEIGHT) * (1 - k), 1 - k);
+		}
+	}
+
+	/**
+	 * The ring of fire spreading over the ground from where the player stood, inside the
+	 * chunk only, fading as it nears the far edges.
+	 */
+	private void drawRing(Graphics2D graphics, int plane, Color base, Opening opening)
+	{
+		double radius = (now - opening.startedAt) / WAVE_MS_PER_TILE;
+		double fade = 1 - radius / 90;
+		if (radius <= 0 || fade <= 0)
+		{
+			return;
+		}
+		Color c = brighten(base, 0.6);
+		Stroke previous = graphics.getStroke();
+		graphics.setStroke(new BasicStroke(3f));
+		graphics.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), (int) (220 * fade)));
+		Point last = null;
+		int steps = 96;
+		for (int i = 0; i <= steps; i++)
+		{
+			double angle = 2 * Math.PI * i / steps;
+			double wx = opening.originX + 0.5 + radius * Math.cos(angle);
+			double wy = opening.originY + 0.5 + radius * Math.sin(angle);
+			double lx = (wx - baseX) * LOCAL_TILE;
+			double ly = (wy - baseY) * LOCAL_TILE;
+			Point p = regionAt((int) wx, (int) wy) != opening.regionId || lx < 0 || ly < 0
+				|| lx >= Constants.SCENE_SIZE * LOCAL_TILE || ly >= Constants.SCENE_SIZE * LOCAL_TILE ? null
+				: Perspective.localToCanvas(client, new LocalPoint((int) lx, (int) ly), plane);
+			if (p != null && last != null)
+			{
+				graphics.drawLine(last.getX(), last.getY(), p.getX(), p.getY());
+			}
+			last = p;
+		}
+		graphics.setStroke(previous);
 	}
 
 	private static int regionAt(int worldX, int worldY)
@@ -223,6 +419,20 @@ public class ChunkWallOverlay extends Overlay
 		boolean openB = isUnlocked(unlocked, regionB);
 		if (openA != openB)
 		{
+			// A chunk opened from inside: its walls surge up and settle as the ring reaches them.
+			for (Opening opening : openings)
+			{
+				if (opening.inside && !opening.waiting() && (opening.regionId == regionA || opening.regionId == regionB))
+				{
+					double t = now - opening.startedAt - Math.hypot(worldX - opening.originX, worldY - opening.originY) * WAVE_MS_PER_TILE;
+					if (t >= 0 && t < SURGE_MS + DROP_MS)
+					{
+						double k = t < SURGE_MS ? easeOut(t / SURGE_MS) : 1 - easeIn((t - SURGE_MS) / DROP_MS);
+						drawWall(graphics, plane, cx1, cy1, cx2, cy2, base, 1 + SURGE_HEIGHT * k, k);
+						return;
+					}
+				}
+			}
 			drawWall(graphics, plane, cx1, cy1, cx2, cy2, base, 1.0, 0);
 			return;
 		}
@@ -275,7 +485,7 @@ public class ChunkWallOverlay extends Overlay
 		// Waiting walls open once every reveal card has been flipped AND cleared off the
 		// screen (a flipped card stays up until it's clicked away), from wherever the
 		// player is standing at that moment.
-		if (!openings.isEmpty() && plugin.getUnrevealedTaskIds().isEmpty() && !cards.isActive())
+		if (!openings.isEmpty() && plugin.getUnrevealedTaskIds().isEmpty() && !ui.get().cards().isActive())
 		{
 			net.runelite.api.coords.WorldPoint at = local.getWorldLocation();
 			for (Opening opening : openings)
@@ -285,6 +495,7 @@ public class ChunkWallOverlay extends Overlay
 					opening.startedAt = now;
 					opening.originX = at.getX();
 					opening.originY = at.getY();
+					opening.inside = regionAt(at.getX(), at.getY()) == opening.regionId;
 				}
 			}
 		}

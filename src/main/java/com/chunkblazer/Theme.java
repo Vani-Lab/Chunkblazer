@@ -26,28 +26,24 @@
 
 package com.chunkblazer;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
-
 /**
- * How the task selected in the side panel is shown in game. Every look is drawn by
- * SelectedTaskOverlay and tracks the same way (right-click Deselect, the Tasks menu on
- * targets); Off hides the box and the menu.
+ * ChunkBlazer's look: the task cards (faces, backs and their flip), the task window, boxes,
+ * buttons and other overlays (Skin), and the side panel (PanelStyle). ChunkBlazer is
+ * btwinnn's original look; Old School is the game's own interfaces; Varlamore is its
+ * carved sandstone and the gold sun of Ralos.
  */
-@Getter
-@RequiredArgsConstructor
-public enum TaskTrackerStyle
+public enum Theme
 {
-	/** Nothing on the game screen; the side panel shows the Selected Task box. */
-	OFF("Off"),
-	/** Net's simple box (designed by NetworkAccessViolation): name, details and a progress bar. */
-	NET("Simple overlay by Net"),
-	/** Vani's full box: requirements, missing levels, timers, close and archive buttons. */
-	VANI("Detailed by Vani"),
-	/** The same, as one small line: name, progress and a thin bar. */
-	COMPACT("Compact by Vani");
+	ORIGINAL("ChunkBlazer"),
+	OLD_SCHOOL("Old School"),
+	ROYAL("Varlamore");
 
 	private final String name;
+
+	Theme(String name)
+	{
+		this.name = name;
+	}
 
 	@Override
 	public String toString()

@@ -52,7 +52,9 @@ public class ChunkBlazerOrbWidget
 	private final EventBus eventBus;
 	private final ChunkBlazerPlugin plugin;
 	private final ChunkBlazerConfig config;
-	private final TaskBrowserOverlay taskBrowser;
+	// The side panel's task list starts and stops with the orbs, and so does ChunkBlazer UI's task UI.
+	private final TaskSidePanel side;
+	private final ChunkBlazerUi ui;
 
 	private final int bossTokenOrbSpriteID = -900;
 	private final int pointsOrbSpriteID = -901;
@@ -65,14 +67,15 @@ public class ChunkBlazerOrbWidget
 
 	@Inject
 	private ChunkBlazerOrbWidget(Client client, ClientThread clientThread, EventBus eventBus, ChunkBlazerPlugin plugin,
-		ChunkBlazerConfig config, TaskBrowserOverlay taskBrowser)
+		ChunkBlazerConfig config, TaskSidePanel side, ChunkBlazerUi ui)
 	{
 		this.client = client;
 		this.clientThread = clientThread;
 		this.eventBus = eventBus;
 		this.plugin = plugin;
 		this.config = config;
-		this.taskBrowser = taskBrowser;
+		this.side = side;
+		this.ui = ui;
 	}
 
 	@Subscribe
@@ -100,7 +103,6 @@ public class ChunkBlazerOrbWidget
 			clientThread.invoke(this::addOrbWidgets);
 		}
 	}
-
 
 	private void addOrbWidgets()
 	{
@@ -135,8 +137,7 @@ public class ChunkBlazerOrbWidget
 			bossTokenText = createOrbWidget(bossTokenOrb, bossTokenOrbSpriteID, bossOrbX, bossOrbY, flip);
 			pointsOrb = parentOrbsWidget.createChild(-1, WidgetType.LAYER);
 			pointsText = createOrbWidget(pointsOrb, pointsOrbSpriteID, pointsOrbX, pointsOrbY, flip);
-			makeTaskButton(pointsOrb, "Tasks", taskBrowser::toggle);
-			makeTaskButton(bossTokenOrb, "Saved tasks", taskBrowser::toggleSavedPane);
+			makeTaskButton(pointsOrb, "Tasks", ui::toggleWindow);
 			wikiWidget = client.getWidget(InterfaceID.Orbs.WIKI);
 			if (wikiWidget != null)
 			{
@@ -151,6 +152,27 @@ public class ChunkBlazerOrbWidget
 				}
 			}
 		}
+	}
+
+	/**
+	 * Canvas position of the centre of the Points (Tasks) orb's round icon, where
+	 * revealed task cards fly to; null if the orbs aren't showing. Client thread.
+	 */
+	java.awt.Point getTasksOrbCentre()
+	{
+		if (pointsOrb == null || pointsOrb.isHidden())
+		{
+			return null;
+		}
+		Widget[] parts = pointsOrb.getDynamicChildren();
+		// Children: [0] frame, [1] number, [2] round icon (see createOrbWidget).
+		Widget target = parts != null && parts.length > 2 ? parts[2] : pointsOrb;
+		java.awt.Rectangle b = target.getBounds();
+		if (b == null || b.width <= 0 || b.height <= 0)
+		{
+			return null;
+		}
+		return new java.awt.Point((int) b.getCenterX(), (int) b.getCenterY());
 	}
 
 	/** Makes an orb clickable, like the Leagues orb: Points opens the task window, Boss Tokens the saved list. */
@@ -236,6 +258,13 @@ public class ChunkBlazerOrbWidget
 		return text;
 	}
 
+	/** The Boss Token orb's bounds on screen, or null when it isn't showing. */
+	java.awt.Rectangle bossOrbBounds()
+	{
+		Widget orb = bossTokenOrb;
+		return orb == null || orb.isHidden() ? null : orb.getBounds();
+	}
+
 	private void removeWidget(Widget widget)
 	{
 		if (widget == null)
@@ -261,7 +290,7 @@ public class ChunkBlazerOrbWidget
 	private void updateOrbs()
 	{
 		// Tell the task window where its button is, so it can point new tasks out.
-		taskBrowser.setTaskButtonBounds(pointsOrb != null && !pointsOrb.isHidden() ? pointsOrb.getBounds() : null);
+		ui.setTaskButtonBounds(pointsOrb != null && !pointsOrb.isHidden() ? pointsOrb.getBounds() : null);
 
 		if (bossTokenText == null || pointsText == null)
 		{
@@ -311,7 +340,8 @@ public class ChunkBlazerOrbWidget
 
 	public void shutDown()
 	{
-		taskBrowser.shutDown();
+		ui.stopTaskUi();
+		side.shutDown();
 		eventBus.unregister(this);
 		cleanup();
 		bossTokenOrb = bossTokenText = pointsOrb = pointsText = wikiWidget = null;
@@ -323,7 +353,8 @@ public class ChunkBlazerOrbWidget
 	public void startUp()
 	{
 		eventBus.register(this);
-		taskBrowser.startUp();
+		side.startUp();
+		ui.startTaskUi();
 		sprite(bossTokenOrbSpriteID, "boss_token_icon.png");
 		// The ChunkBlazer logo (the fire in a square) on the Points orb.
 		sprite(pointsOrbSpriteID, "points_orb_icon.png");

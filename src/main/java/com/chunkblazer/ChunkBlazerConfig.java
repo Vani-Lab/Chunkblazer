@@ -307,103 +307,6 @@ public interface ChunkBlazerConfig extends Config
 		return true;
 	}
 
-	@ConfigItem(
-		keyName = "taskTrackerStyle",
-		name = "Task Box",
-		description = "How the task you track is shown in game. Off hides it",
-		section = taskSection,
-		position = 1
-	)
-	default TaskTrackerStyle taskTrackerStyle()
-	{
-		return TaskTrackerStyle.VANI;
-	}
-
-	@ConfigItem(
-		keyName = "autoTrackTasks",
-		name = "Auto-Track Tasks",
-		description = "Using an NPC or object a task needs tracks that task. A task you picked yourself is kept",
-		section = taskSection,
-		position = 2
-	)
-	default boolean autoTrackTasks()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "movableTaskBox",
-		name = "Movable Quest/Saved Box",
-		description = "Open quest requirements and saved tasks in a box you can Alt + drag, instead of over the inventory",
-		section = taskSection,
-		position = 3
-	)
-	default boolean movableTaskBox()
-	{
-		return false;
-	}
-
-	@ConfigItem(
-		keyName = "taskRightClickMenu",
-		name = "Right-Click Tasks Menu",
-		description = "Adds a Tasks submenu when right-clicking NPCs and objects your tasks need",
-		section = taskSection,
-		position = 4
-	)
-	default boolean taskRightClickMenu()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "highlightTaskTargets",
-		name = "Outline Task Targets",
-		description = "Older on/off outline setting, kept so Outlines starts where players left it",
-		section = taskSection,
-		position = 5,
-		hidden = true
-	)
-	default boolean highlightTaskTargets()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "taskOutlineMode",
-		name = "Outlines",
-		description = "Which task NPCs and objects get outlined: all, saved, doable now, or none",
-		section = taskSection,
-		position = 5
-	)
-	default OutlineMode taskOutlineMode()
-	{
-		return highlightTaskTargets() ? OutlineMode.ALL : OutlineMode.OFF;
-	}
-
-	@ConfigItem(
-		keyName = "taskHighlightColor",
-		name = "Outline Colour",
-		description = "Outline colour for task NPCs and objects you can do now",
-		section = taskSection,
-		position = 6
-	)
-	default java.awt.Color taskHighlightColor()
-	{
-		return new java.awt.Color(255, 140, 0);
-	}
-
-	@ConfigItem(
-		keyName = "taskHighlightUnavailableColor",
-		name = "Outline Colour (Level Too Low)",
-		description = "Outline colour when you don't have the level for any of that target's tasks",
-		section = taskSection,
-		position = 7
-	)
-	default java.awt.Color taskHighlightUnavailableColor()
-	{
-		return new java.awt.Color(255, 60, 60);
-	}
-
 	// ── World Map ────────────────────────────────────────────────────────
 
 	@ConfigSection(
@@ -440,18 +343,6 @@ public interface ChunkBlazerConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showChunkLegend",
-		name = "Colour Legend",
-		description = "Show a key explaining the chunk colours in the corner of the world map",
-		section = worldMapSection,
-		position = 2
-	)
-	default boolean showChunkLegend()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "showChunkGridLines",
 		name = "Lines Between Unlocked Chunks",
 		description = "Outline each unlocked chunk. Off shows your unlocked area as one piece.",
@@ -473,7 +364,7 @@ public interface ChunkBlazerConfig extends Config
 	)
 	default java.awt.Color worldMapLockedColor()
 	{
-		return new java.awt.Color(0, 0, 0, 160);
+		return new java.awt.Color(0, 0, 0, 200);
 	}
 
 	@net.runelite.client.config.Alpha
@@ -487,19 +378,6 @@ public interface ChunkBlazerConfig extends Config
 	default java.awt.Color worldMapPaidColor()
 	{
 		return new java.awt.Color(255, 215, 0, 110);
-	}
-
-	@net.runelite.client.config.Alpha
-	@ConfigItem(
-		keyName = "worldMapFreeColor",
-		name = "Free Chunk Colour",
-		description = "Tint over chunks you unlock for free by walking in",
-		section = worldMapSection,
-		position = 6
-	)
-	default java.awt.Color worldMapFreeColor()
-	{
-		return new java.awt.Color(80, 230, 230, 110);
 	}
 
 	@net.runelite.client.config.Alpha
@@ -583,15 +461,16 @@ public interface ChunkBlazerConfig extends Config
 	String inGameSection = "inGame";
 
 	@ConfigItem(
-		keyName = "showSceneChunks",
+		keyName = "sceneChunkBorders",
 		name = "Chunk Borders",
-		description = "Draw chunk borders on the ground in the game world",
+		description = "Chunk borders on the ground. Auto: on with ChunkBlazer alone, off while ChunkBlazer UI or GPU"
+			+ " is on (they draw their own walls)",
 		section = inGameSection,
 		position = 0
 	)
-	default boolean showSceneChunks()
+	default SceneBorders sceneChunkBorders()
 	{
-		return false;
+		return SceneBorders.AUTO;
 	}
 
 	@ConfigItem(
@@ -620,18 +499,6 @@ public interface ChunkBlazerConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showChunkNamePopups",
-		name = "Chunk Name Banner",
-		description = "Show a chunk's name at the top of the screen when you enter it",
-		section = inGameSection,
-		position = 3
-	)
-	default boolean showChunkNamePopups()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "showTaskCompletionPopup",
 		name = "Task Completion Popup",
 		description = "Display a popup when you complete a task",
@@ -644,13 +511,6 @@ public interface ChunkBlazerConfig extends Config
 	}
 
 	// ── Sounds ───────────────────────────────────────────────────────────
-
-	@ConfigSection(
-		name = "Sounds",
-		description = "Task completion sounds and chunk unlock jingles",
-		position = 5
-	)
-	String soundSection = "sounds";
 
 	@ConfigItem(
 		keyName = "playTaskCompletionSound",
@@ -697,13 +557,6 @@ public interface ChunkBlazerConfig extends Config
 
 	// ── Chat Messages ────────────────────────────────────────────────────
 
-	@ConfigSection(
-		name = "Chat Messages",
-		description = "Control which task messages appear in chat",
-		position = 6
-	)
-	String chatSection = "chat";
-
 	@ConfigItem(
 		keyName = "showChatProgress",
 		name = "Show Task Progress",
@@ -739,6 +592,20 @@ public interface ChunkBlazerConfig extends Config
 	{
 		return true;
 	}
+
+	@ConfigSection(
+		name = "Sounds",
+		description = "Task completion and chunk unlock sounds",
+		position = 6
+	)
+	String soundSection = "sounds";
+
+	@ConfigSection(
+		name = "Chat Messages",
+		description = "Task messages in the chatbox",
+		position = 8
+	)
+	String chatSection = "chat";
 
 	// ── Region Unlock ────────────────────────────────────────────────────
 

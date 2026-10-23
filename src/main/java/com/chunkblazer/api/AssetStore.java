@@ -225,12 +225,6 @@ public class AssetStore
 		}
 	}
 
-	/** True once a non-empty manifest has been loaded from cache or network. */
-	public boolean isLoaded()
-	{
-		return loaded;
-	}
-
 	/**
 	 * The jingles available for an area folder (e.g. {@code Misthalin_Sounds}),
 	 * or an empty list if the manifest hasn't loaded or has no such area.

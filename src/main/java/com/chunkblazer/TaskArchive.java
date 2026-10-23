@@ -106,21 +106,6 @@ public class TaskArchive
 		return cachedIds.get(key);
 	}
 
-	public boolean isArchived(NuzlockeTask task)
-	{
-		return task != null && task.getTaskId() != null && ids().contains(task.getTaskId());
-	}
-
-	public void archive(String taskId)
-	{
-		write(ARCHIVE_KEY, taskId, true);
-	}
-
-	public void toggle(String taskId)
-	{
-		write(ARCHIVE_KEY, taskId, !ids().contains(taskId));
-	}
-
 	private synchronized void write(String key, String taskId, boolean add)
 	{
 		if (taskId == null || configManager.getRSProfileKey() == null)
