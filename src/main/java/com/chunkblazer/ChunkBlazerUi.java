@@ -92,4 +92,95 @@ public interface ChunkBlazerUi
 
 	/** A task done: the completion popup, if there is one. */
 	void showTaskCompletion(NuzlockeTask task, int points, String region);
+
+	/** Nothing at all: what the plugin holds until Guice gives it the real one (and in tests). */
+	ChunkBlazerUi NONE = new ChunkBlazerUi()
+	{
+		private final TaskCardShow noCards = new TaskCardShow()
+		{
+			@Override
+			public boolean isActive()
+			{
+				return false;
+			}
+
+			@Override
+			public boolean onClick(int x, int y)
+			{
+				return false;
+			}
+
+			@Override
+			public void clear()
+			{
+			}
+
+			@Override
+			public void onSweepStarted(boolean test, long durationMs)
+			{
+			}
+
+			@Override
+			public void onSweepFinished()
+			{
+			}
+		};
+
+		@Override
+		public void startUp()
+		{
+		}
+
+		@Override
+		public void shutDown()
+		{
+		}
+
+		@Override
+		public void showGameUi(boolean show)
+		{
+		}
+
+		@Override
+		public void startTaskUi()
+		{
+		}
+
+		@Override
+		public void stopTaskUi()
+		{
+		}
+
+		@Override
+		public void toggleWindow()
+		{
+		}
+
+		@Override
+		public void setTaskButtonBounds(Rectangle bounds)
+		{
+		}
+
+		@Override
+		public void openTask(NuzlockeTask task)
+		{
+		}
+
+		@Override
+		public TaskCardShow cards()
+		{
+			return noCards;
+		}
+
+		@Override
+		public TutorialHooks tutorial()
+		{
+			return TutorialHooks.NONE;
+		}
+
+		@Override
+		public void showTaskCompletion(NuzlockeTask task, int points, String region)
+		{
+		}
+	};
 }

@@ -196,7 +196,7 @@ public class ChunkBlazerPlugin extends Plugin
 
 	// ChunkBlazer UI (the task window, animated cards, tutorial...), or CoreOnlyUi without it.
 	@Inject
-	private ChunkBlazerUi ui;
+	private ChunkBlazerUi ui = ChunkBlazerUi.NONE;
 
 	@Inject
 	private ChunkWallOverlay chunkWallOverlay;
@@ -534,6 +534,11 @@ public class ChunkBlazerPlugin extends Plugin
 	}
 
 	private boolean tutorialView;
+
+	/** A chatbox option that only closes the box (OK, No). */
+	private static void nothing()
+	{
+	}
 
 	/** What a practice task outlines in game ("npc:..." or "object:..."), or null for any other task. */
 	String getPracticeTarget(String taskId)
@@ -1334,7 +1339,7 @@ public class ChunkBlazerPlugin extends Plugin
 					// Not enough tokens - show info message
 					chatboxPanelManager.openTextMenuInput(
 									"You need a Boss Token to unlock " + chunkName + ".")
-							.option("OK", () -> { })
+							.option("OK", ChunkBlazerPlugin::nothing)
 							.build();
 				}
 				else
@@ -1344,7 +1349,7 @@ public class ChunkBlazerPlugin extends Plugin
 									"Unlock " + chunkName + " for 1 Boss Token? " +
 											"(Remaining: " + (currentTokens - 1) + ")")
 							.option("Yes, unlock!", () -> unlockRegion(regionId))
-							.option("No, not yet", () -> { })
+							.option("No, not yet", ChunkBlazerPlugin::nothing)
 							.build();
 				}
 			}
@@ -1353,7 +1358,7 @@ public class ChunkBlazerPlugin extends Plugin
 				// Not enough points - show info message
 				chatboxPanelManager.openTextMenuInput(
 								"You need " + (cost - currentPoints) + " more points to unlock " + chunkName + ".")
-						.option("OK", () -> { })
+						.option("OK", ChunkBlazerPlugin::nothing)
 						.build();
 			}
 			else
@@ -1363,7 +1368,7 @@ public class ChunkBlazerPlugin extends Plugin
 								"Unlock " + chunkName + " for " + cost + " points? " +
 										"(Remaining: " + (currentPoints - cost) + ")")
 						.option("Yes, unlock!", () -> unlockRegion(regionId))
-						.option("No, not yet", () -> { })
+						.option("No, not yet", ChunkBlazerPlugin::nothing)
 						.build();
 			}
 		});
@@ -7393,7 +7398,7 @@ public class ChunkBlazerPlugin extends Plugin
 	 * and the granted starting chunk are excluded, because none of them are priced by
 	 * the points curve. This is the "rank" the next paid unlock is charged at.
 	 */
-	 int countPayableUnlockedChunks()
+	int countPayableUnlockedChunks()
 	{
 		java.util.Set<Integer> seenChunks = new java.util.HashSet<>();
 		for (String s : getUnlockedRegionIds())
