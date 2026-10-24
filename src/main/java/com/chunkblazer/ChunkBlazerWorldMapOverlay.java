@@ -149,6 +149,11 @@ public class ChunkBlazerWorldMapOverlay extends Overlay
 		// The focus outline goes on top of the chunk tints.
 		Dimension size = renderChunks(graphics);
 		renderFocus(graphics);
+		// ChunkBlazer UI draws the hover tooltip on its top layer; without it, draw it here.
+		if (!addOns.uiOn())
+		{
+			drawTooltip(graphics);
+		}
 		return size;
 	}
 
