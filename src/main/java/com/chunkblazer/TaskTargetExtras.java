@@ -117,7 +117,7 @@ public final class TaskTargetExtras
 				needs.merge(need.getKey(), need.getValue(), Math::max);
 			}
 		}
-		// Obtain/Equip levels from the sources sheet (task_sources.json).
+		// Obtain/Equip levels from the sources sheet (the _Task_Sources.json sidecar).
 		for (Map.Entry<Skill, Integer> need : TaskSources.levels(task).entrySet())
 		{
 			needs.merge(need.getKey(), need.getValue(), Math::max);

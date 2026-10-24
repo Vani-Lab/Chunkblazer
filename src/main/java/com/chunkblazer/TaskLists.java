@@ -38,6 +38,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -132,7 +133,8 @@ public class TaskLists
 	public volatile Set<Filter> filterHidden = Collections.emptySet();
 	public volatile Skill filterSkill;
 	public volatile TaskCardTier filterTier;
-	public final Map<String, String> chunkNames = new HashMap<>();
+	// Filled on the client thread (side list), read on the Swing thread (its rows): concurrent.
+	public final Map<String, String> chunkNames = new ConcurrentHashMap<>();
 	private final Map<String, List<String>> requirements = new HashMap<>();
 
 	/** Chunks paid for with points or a boss token; free, charter and starting chunks don't count. */

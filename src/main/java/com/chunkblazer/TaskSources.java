@@ -28,11 +28,7 @@ package com.chunkblazer;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
 import java.lang.reflect.Type;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -44,9 +40,10 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Skill;
 
 /**
- * Where to get each Obtain and Equip task's item, read from task_sources.json (built from
- * the obtain/equip sources sheet): the source NPC, object or activity, drop rate or cost,
- * the unique part for made items, a short where/how note, and the real level needed.
+ * Where to get each Obtain and Equip task's item, read from the catalog's _Task_Sources.json
+ * sidecar (built from the obtain/equip sources sheet): the source NPC, object or activity,
+ * drop rate or cost, the unique part for made items, a short where/how note, and the real
+ * level needed.
  *
  * UI only: it adds lines under an expanded task in the task window, outlines the source
  * by name, and adds its level to the "(Lvl ...)" note. Task data, completion and the
@@ -55,7 +52,8 @@ import net.runelite.api.Skill;
 @Slf4j
 public final class TaskSources
 {
-	private static final String RESOURCE = "task_sources.json";
+	/** The catalog sidecar these come from (server task-authoring/_Task_Sources.json). */
+	static final String SIDECAR = "_Task_Sources.json";
 	private static final Pattern LEVEL = Pattern.compile("(\\d+)\\s+([A-Za-z]+)");
 
 	/** One task's entry. Every field is optional. */
@@ -84,26 +82,27 @@ public final class TaskSources
 	{
 	}
 
-	/** Reads task_sources.json. Missing or broken data just means no source info. */
-	public static void load(Gson gson)
+	/**
+	 * Load the sources from the catalog sidecar's JSON (served with the task files, so it
+	 * updates with the catalog and costs the plugin nothing). Missing or broken data just
+	 * means no source info.
+	 */
+	public static void load(String json, Gson gson)
 	{
 		Map<String, Source> loaded = null;
-		try (InputStream in = TaskSources.class.getResourceAsStream(RESOURCE))
+		try
 		{
-			if (in != null)
+			if (json != null && !json.isEmpty())
 			{
 				Type type = new TypeToken<Map<String, Source>>()
 				{
 				}.getType();
-				try (Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8))
-				{
-					loaded = gson.fromJson(reader, type);
-				}
+				loaded = gson.fromJson(json, type);
 			}
 		}
 		catch (Exception e)
 		{
-			log.warn("Could not read {}", RESOURCE, e);
+			log.warn("Could not read {}", SIDECAR, e);
 		}
 		sources = loaded == null ? Collections.emptyMap() : loaded;
 

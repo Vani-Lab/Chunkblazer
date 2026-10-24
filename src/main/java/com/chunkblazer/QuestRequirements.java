@@ -27,7 +27,6 @@ package com.chunkblazer;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-import java.awt.Color;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -79,46 +78,6 @@ public class QuestRequirements
 		List<String> quests;
 		Integer questPoints;
 		Integer combat;
-	}
-
-	/**
-	 * One line under an expanded task: plain text, a section header (click to open or
-	 * close it), or an item inside a section. A chunk item carries its region (click to
-	 * see it on the map); a quest item carries the quest's name (click to jump to it).
-	 */
-	public static final class Line
-	{
-		public final String text;
-		public final Color color;
-		public final int region;
-		public final String quest;
-		public final String toggle;
-		public final boolean header;
-		public final boolean open;
-		public final int indent;
-		public final int gap;
-		/** An OSRS Wiki page this line opens when clicked (an Obtain or Equip task's item), or null. */
-		public final String wiki;
-
-		public Line(String text, Color color)
-		{
-			this(text, color, -1, null, null, false, false, 0, 0, null);
-		}
-
-		private Line(String text, Color color, int region, String quest, String toggle, boolean header, boolean open,
-			int indent, int gap, String wiki)
-		{
-			this.wiki = wiki;
-			this.text = text;
-			this.color = color;
-			this.region = region;
-			this.quest = quest;
-			this.toggle = toggle;
-			this.header = header;
-			this.open = open;
-			this.indent = indent;
-			this.gap = gap;
-		}
 	}
 
 	private final Client client;
@@ -211,9 +170,9 @@ public class QuestRequirements
 		}
 	}
 
-	/** True for quest tasks (they get the requirement list, with or without data). */
 	/**
-	 * A "Complete <quest>" task. Other tasks can complete on a quest too (Defeat Damis, Obtain
+	 * True for quest tasks (they get the requirement list, with or without data): a "Complete
+	 * {@code <quest>}" task. Other tasks can complete on a quest too (Defeat Damis, Obtain
 	 * a Black Candle: QUEST_CHECK, but category Combat/Obtain); those are normal tasks, tracked
 	 * and listed like any other, not quests.
 	 */

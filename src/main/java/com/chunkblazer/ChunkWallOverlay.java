@@ -49,8 +49,6 @@ import net.runelite.api.Point;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.PluginMessage;
-import net.runelite.client.plugins.Plugin;
-import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -161,17 +159,15 @@ public class ChunkWallOverlay extends Overlay
 	private final ChunkBlazerConfig config;
 	// The task cards (ChunkBlazer UI's, or the plain ones): asked lazily, as ChunkBlazer UI uses this overlay.
 	private final Provider<ChunkBlazerUi> ui;
-	private final PluginManager pluginManager;
-	// Whether ChunkBlazer GPU is running, checked about once a second.
-	private boolean gpuOn;
-	private long gpuCheckedAt;
+	// Knows whether ChunkBlazer GPU is on (the same lookup as the add-ons box).
+	private final CompanionPrompt addOns;
 
 	@Inject
 	public ChunkWallOverlay(Client client, ChunkBlazerPlugin plugin, ChunkBlazerConfig config,
-		Provider<ChunkBlazerUi> ui, PluginManager pluginManager)
+		Provider<ChunkBlazerUi> ui, CompanionPrompt addOns)
 	{
 		this.ui = ui;
-		this.pluginManager = pluginManager;
+		this.addOns = addOns;
 		this.client = client;
 		this.plugin = plugin;
 		this.config = config;
@@ -181,32 +177,11 @@ public class ChunkWallOverlay extends Overlay
 		setPriority(OverlayPriority.LOW);
 	}
 
-	/** True while the ChunkBlazer GPU plugin is turned on (checked about once a second). */
-	private boolean gpuRunning()
-	{
-		long now = System.currentTimeMillis();
-		if (now - gpuCheckedAt > 1000)
-		{
-			gpuCheckedAt = now;
-			boolean on = false;
-			for (Plugin p : pluginManager.getPlugins())
-			{
-				if (p.getClass().getSimpleName().equals("ChunkBlazerGpuPlugin") && pluginManager.isPluginActive(p))
-				{
-					on = true;
-					break;
-				}
-			}
-			gpuOn = on;
-		}
-		return gpuOn;
-	}
-
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
 		// ChunkBlazer GPU draws its own wall into the scene; this one is for when it's off.
-		if (!config.showChunkWalls() || client.isInInstancedRegion() || gpuRunning())
+		if (!config.showChunkWalls() || client.isInInstancedRegion() || addOns.gpuOn())
 		{
 			// Start fresh when walls come back, so nothing unlocked meanwhile replays.
 			lastSeen.clear();
