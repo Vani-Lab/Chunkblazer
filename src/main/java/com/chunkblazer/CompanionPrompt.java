@@ -218,6 +218,15 @@ class CompanionPrompt extends Overlay
 		return anyOn;
 	}
 
+	// Whether ChunkBlazer UI was on at the last look.
+	private volatile boolean uiOn;
+
+	/** Whether ChunkBlazer UI is on (as of the last game tick). */
+	boolean uiOn()
+	{
+		return uiOn;
+	}
+
 	/** Whether ChunkBlazer GPU is on right now (it draws the chunk walls into the scene itself). */
 	boolean gpuOn()
 	{
@@ -264,6 +273,7 @@ class CompanionPrompt extends Overlay
 			allOn &= on;
 		}
 		anyOn = any;
+		uiOn = isOn(COMPANIONS[0]);
 		boolean wanted = asked || !Boolean.parseBoolean(configManager.getConfiguration(GROUP, DONE))
 			&& client.getVarpValue(net.runelite.api.gameval.VarPlayerID.TUTORIAL) >= GUIDE_DONE;
 		if (allOn)
