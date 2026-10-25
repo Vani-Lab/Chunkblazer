@@ -394,8 +394,8 @@ public class UiBridge
 			case "enableServerSync":
 				plugin.enableServerSync();
 				return null;
-			case "applyPanelTheme":
-				applyPanelTheme(a.get(0));
+			case "setSidePainter":
+				setSidePainter(a.get(0));
 				return null;
 			case "setSidePanelSearch":
 				sidePanel.setSearch(s(a, 0) == null ? "" : s(a, 0));
@@ -435,10 +435,13 @@ public class UiBridge
 		}
 	}
 
-	/** The side panel takes the UI's theme (its palette, field by field), or its own look. */
-	void applyPanelTheme(Object palette)
+	/** ChunkBlazer UI draws the side panel in its theme (a painter, see SidePaint), or null for its own look. */
+	@SuppressWarnings("unchecked")
+	void setSidePainter(Object painter)
 	{
-		Skin.setPalette(palette instanceof Map ? ThemePalette.fromMap((Map<?, ?>) palette) : ThemePalette.original());
+		SidePaint.painter = painter instanceof java.util.function.BiPredicate ? (java.util.function.BiPredicate<String, Object[]>) painter : null;
+		SidePaint.version++;
+		sidePanel.restyle();
 		ChunkBlazerPanel panel = plugin.getPanel();
 		if (panel != null)
 		{

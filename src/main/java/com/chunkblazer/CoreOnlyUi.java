@@ -77,6 +77,7 @@ public class CoreOnlyUi implements ChunkBlazerUi
 	public void startUp()
 	{
 		// ChunkBlazer's own look, the side panel included (also when ChunkBlazer UI is switched off).
+		SidePaint.painter = null;
 		Skin.setPalette(ThemePalette.original());
 		ChunkBlazerPanel panel = plugin.getPanel();
 		if (panel != null)
