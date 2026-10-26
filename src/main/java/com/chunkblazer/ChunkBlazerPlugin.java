@@ -236,6 +236,8 @@ public class ChunkBlazerPlugin extends Plugin
 	// to the client thread, so without this a burst of reloads queues a pile of
 	// overlapping backfills.
 	private volatile boolean questBackfillInFlight;
+	// ChunkBlazer UI's theme plays its own completion sound in place of the area jingle.
+	volatile boolean uiCompletionSound;
 
 	private final List<NuzlockeChunk> allChunks = new ArrayList<>();
 	private final Map<Integer, NuzlockeChunk> chunksByRegionId = new HashMap<>();
@@ -6197,7 +6199,7 @@ public class ChunkBlazerPlugin extends Plugin
 		}
 		// One sound for the whole batch — N clips at once on a login storm is both a
 		// cacophony and needless load.
-		if (config.playTaskCompletionSound() && soundManager != null)
+		if (config.playTaskCompletionSound() && soundManager != null && !uiCompletionSound)
 		{
 			playAreaSoundAsync(getTaskArea(batch.get(0)));
 		}
@@ -7683,7 +7685,7 @@ public class ChunkBlazerPlugin extends Plugin
 	/** The task complete sound for the chunk you're in, as a real completion would play it (the popup's Test). */
 	void playTaskCompleteSound()
 	{
-		if (!config.playTaskCompletionSound() || soundManager == null)
+		if (!config.playTaskCompletionSound() || soundManager == null || uiCompletionSound)
 		{
 			return;
 		}

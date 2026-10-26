@@ -397,6 +397,9 @@ public class UiBridge
 			case "setSidePainter":
 				setSidePainter(a.get(0));
 				return null;
+			case "setUiCompletionSound":
+				plugin.uiCompletionSound = Boolean.TRUE.equals(a.get(0));
+				return null;
 			case "setSidePanelSearch":
 				sidePanel.setSearch(s(a, 0) == null ? "" : s(a, 0));
 				return null;
