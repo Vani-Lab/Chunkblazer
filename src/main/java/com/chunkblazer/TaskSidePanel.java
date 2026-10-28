@@ -1366,7 +1366,7 @@ public class TaskSidePanel
 			public void paintIcon(java.awt.Component c, java.awt.Graphics g, int x, int y)
 			{
 				Graphics2D g2 = (Graphics2D) g.create();
-				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				Skin.smooth(g2);
 				g2.setColor(ColorScheme.DARK_GRAY_COLOR);
 				g2.fillRect(x, y, 10, 10);
 				g2.setColor(ColorScheme.MEDIUM_GRAY_COLOR);
@@ -1401,8 +1401,7 @@ public class TaskSidePanel
 	/** A small gear: a toothed ring with a hole. */
 	private static void gear(Graphics2D g, Rectangle r, Color color)
 	{
-		Object aa = g.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
-		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		Object aa = Skin.smooth(g);
 		double cx = r.getCenterX();
 		double cy = r.getCenterY();
 		double outer = r.width / 2.0;
@@ -1430,7 +1429,7 @@ public class TaskSidePanel
 		g.fill(java.awt.geom.AffineTransform.getTranslateInstance(1, 1).createTransformedShape(shape));
 		g.setColor(color);
 		g.fill(shape);
-		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, aa == null ? RenderingHints.VALUE_ANTIALIAS_DEFAULT : aa);
+		Skin.restore(g, aa);
 	}
 
 	/** Text wrapped to a card's width, each line with its colour and font, for sideCard to draw. */
@@ -1454,7 +1453,7 @@ public class TaskSidePanel
 		boolean saved, boolean global, int progress, int target, Font font)
 	{
 		Color flame = new Color(255, 152, 0);
-		g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		Skin.smooth(g2);
 		java.awt.geom.RoundRectangle2D box = new java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f, w - 1.5f, h - 1.5f, 12, 12);
 		float shade = selected ? 0.66f : hover ? 0.58f : 0.48f;
 		g2.setColor(new Color((int) (tier.getRed() * shade), (int) (tier.getGreen() * shade), (int) (tier.getBlue() * shade)));
@@ -1531,7 +1530,7 @@ public class TaskSidePanel
 		}
 		int d = 16;
 		int cx = x - 1;
-		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		Skin.smooth(g);
 		g.setColor(tier);
 		g.fillOval(cx, y, d, d);
 		g.setColor(new Color(255, 255, 255, 70));
@@ -1540,7 +1539,7 @@ public class TaskSidePanel
 		g.drawOval(cx, y, d, d);
 		double centreX = cx + d / 2.0;
 		double centreY = y + d / 2.0;
-		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, aa == null ? RenderingHints.VALUE_ANTIALIAS_DEFAULT : aa);
+		Skin.restore(g, aa);
 		// Bold, and centred on the badge by the digits' own drawn outline, not the font's box.
 		// Two-digit numbers too wide for the badge in bold drop to the small font.
 		String text = String.valueOf(points);

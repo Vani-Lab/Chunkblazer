@@ -509,27 +509,8 @@ public class AgilityModule extends AbstractTaskModule
 			required = 1;
 		}
 
-		task.setCurrentProgress(newProgress);
-
-		sendTaskProgress(task, null, newProgress, required);
-
-		if (completionCallback != null)
+		if (credit(task, newProgress, required, null))
 		{
-			completionCallback.onProgressUpdated(task, newProgress);
-		}
-
-		// Check for completion
-		if (newProgress >= required && !task.isCompleted())
-		{
-			task.setCompleted(true);
-
-			sendTaskSuccess(task, null);
-
-			if (completionCallback != null)
-			{
-				completionCallback.onTaskCompleted(task, newProgress);
-			}
-
 			// Clean up — drop the per-task object IDs and rebuild the watched union so
 			// other tasks' lap-end objects keep firing but this task's no longer do.
 			activeTasks.remove(task);
