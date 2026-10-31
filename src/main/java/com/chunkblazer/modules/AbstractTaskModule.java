@@ -416,7 +416,8 @@ public abstract class AbstractTaskModule implements TaskCompletionModule
 	{
 		if (config.showChatSuccess())
 		{
-			announce(COLOR_DARK_BLUE, "Task Complete!", task, "", details);
+			// The task's name says what was done, so no detail line under it.
+			announce(COLOR_DARK_BLUE, "Task Complete!", task, "", null);
 		}
 	}
 
